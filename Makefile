@@ -3,7 +3,7 @@ PREFIX := /usr/local
 BINDIR := $(PREFIX)/bin
 
 CC ?= clang
-CFLAGS = -std=c11 -D_XOPEN_SOURCE=700 -Wall -Wno-sign-compare -Wextra -pedantic -O2
+CFLAGS = -std=c11 -D_XOPEN_SOURCE=700 -Wall -Wextra -pedantic -O2
 LDFLAGS =
 SOURCES = $(wildcard *.c)
 OBJECTS = $(SOURCES:.c=.o)
