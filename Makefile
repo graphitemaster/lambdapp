@@ -5,7 +5,7 @@ BINDIR := $(PREFIX)/bin
 CC ?= clang
 CFLAGS = -std=c11 -D_XOPEN_SOURCE=700 -Wall -Wno-sign-compare -Wextra -pedantic -O2
 LDFLAGS =
-SOURCES = $(shell echo *.c)
+SOURCES = $(wildcard *.c)
 OBJECTS = $(SOURCES:.c=.o)
 LAMBDAPP = lambdapp
 
