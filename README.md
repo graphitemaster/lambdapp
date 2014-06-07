@@ -18,9 +18,11 @@ hashtable_foreach(table,
 ```
 
 Closures are not supported by this system. It's important to note these are not
-nested functions or blocks.
+nested functions or blocks, for information on these please see the following
+links.
 
 [_Nested functions_](https://gcc.gnu.org/onlinedocs/gcc/Nested-Functions.html)
+
 [_Blocks_](http://clang.llvm.org/docs/Block-ABI-Apple.html)
 
 This is a source translation that produces global functions and replaces instances
