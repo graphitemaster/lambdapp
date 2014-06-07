@@ -1,5 +1,5 @@
 ### Synposis
-    LambdaPP is a preprocessor for giving you anonymous functions in C.
+LambdaPP is a preprocessor for giving you anonymous functions in C.
 
 ### Examples
 ```
@@ -39,6 +39,22 @@ Would be translated to
 ```
 ({ void lambda_0(void); &lambda_0 })();
 void lambda_0(void) { printf("Hello world"); }
+```
+
+To better see how it works, here's the original example expanded
+```
+hashtable_t *table;
+hashtable_foreach(table,
+     ({ void lambda_0(list_t *list); &lambda_0; })
+);
+void lambda_0(list_t *list) {
+    list_foreach(list,
+         ({ void lambda_1(const char *occupant); &lambda_1; })
+    );
+}
+void lambda_1(const char *occupant) {
+    printf(">> %s\n", occupant);
+}
 ```
 
 Take note that we do utilize compound statement expressions since we don't know
