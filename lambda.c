@@ -43,7 +43,6 @@ typedef struct {
 
 typedef struct {
     size_t         start;
-    size_t         line;
     lambda_range_t type;
     lambda_range_t args;
     lambda_range_t body;
@@ -194,6 +193,8 @@ static size_t parse_word(lambda_source_t *source, lambda_vector_t *lambdas, size
     return i;
 }
 
+#define ERROR ((size_t)-1)
+
 static size_t parse(lambda_source_t *source, lambda_vector_t *lambdas, size_t i, bool inlambda, bool special) {
     lambda_vector_t parens;
     lambda_t        lambda;
@@ -206,36 +207,35 @@ static size_t parse(lambda_source_t *source, lambda_vector_t *lambdas, size_t i,
         i = parse_skip_white(source, i);
         lambda.type.begin = i;
         if (source->data[i] == '(') {
-            if ((i = parse(source, lambdas, i, false, true)) == -1) {
+            if ((i = parse(source, lambdas, i, false, true)) == ERROR) {
                 lambda_vector_destroy(&parens);
-                return -1;
+                return ERROR;
             }
         }
         i = parse_skip_to(source, i, '(');
         lambda.type.length = i - lambda.type.begin;
         lambda.args.begin = i;
-        if ((i = parse(source, lambdas, i, false, true)) == -1) {
+        if ((i = parse(source, lambdas, i, false, true)) == ERROR) {
             lambda_vector_destroy(&parens);
-            return -1;
+            return ERROR;
         }
         lambda.args.length = i - lambda.args.begin + 1;
         i = parse_skip_to(source, i, '{');
         lambda.body.begin = i;
-        lambda.line = source->line;
     }
 
     size_t j = i;
     while (i < source->length) {
         if (source->data[i] == '"') {
-            if (!special && (i = parse_word(source, lambdas, j, i)) == -1)
+            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
                 goto parse_error;
             j = i = parse_skip_string(source, i+1, source->data[i]);
         } else if (source->data[i] == '\'') {
-            if (!special && (i = parse_word(source, lambdas, j, i)) == -1)
+            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
                 goto parse_error;
             j = i = parse_skip_string(source, i+1, source->data[i]);
         } else if (strchr("([{", source->data[i])) {
-            if (!special && (i = parse_word(source, lambdas, j, i)) == -1)
+            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
                 goto parse_error;
             lambda_vector_push_char(&parens, strchr("([{)]}", source->data[i])[3]);
             j = ++i;
@@ -267,11 +267,11 @@ static size_t parse(lambda_source_t *source, lambda_vector_t *lambdas, size_t i,
                     return i;
                 }
             }
-            if (!special && (i = parse_word(source, lambdas, j, i)) == -1)
+            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
                 goto parse_error;
             j = ++i;
         } else if (source->data[i] != '_' && !isalnum(source->data[i])) {
-            if (!special && (i = parse_word(source, lambdas, j, i)) == -1)
+            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
                 goto parse_error;
             j = ++i;
         } else
@@ -283,7 +283,7 @@ static size_t parse(lambda_source_t *source, lambda_vector_t *lambdas, size_t i,
 
 parse_error:
     lambda_vector_destroy(&parens);
-    return -1;
+    return ERROR;
 }
 
 /* Generator */
@@ -336,7 +336,7 @@ static void generate_begin(lambda_source_t *source, lambda_t *lambda, size_t nam
 static void generate(lambda_source_t *source) {
     lambda_vector_t lambdas;
     lambda_vector_init(&lambdas, true);
-    if (parse(source, &lambdas, 0, false, false) == -1) {
+    if (parse(source, &lambdas, 0, false, false) == ERROR) {
         lambda_vector_destroy(&lambdas);
         return;
     }
