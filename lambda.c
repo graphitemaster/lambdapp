@@ -43,6 +43,7 @@ typedef struct {
 
 typedef struct {
     size_t         start;
+    size_t         line;
     lambda_range_t type;
     lambda_range_t args;
     lambda_range_t body;
@@ -193,12 +194,11 @@ static size_t parse_word(lambda_source_t *source, lambda_vector_t *lambdas, size
     return i;
 }
 
-#define ERROR ((size_t)-1)
-
 static size_t parse(lambda_source_t *source, lambda_vector_t *lambdas, size_t i, bool inlambda, bool special) {
     lambda_vector_t parens;
-    lambda_t        lambda = { 0 };
+    lambda_t        lambda;
 
+    memset(&lambda, 0, sizeof(lambda_t));
     lambda_vector_init(&parens, false);
 
     if (inlambda) {
@@ -206,35 +206,36 @@ static size_t parse(lambda_source_t *source, lambda_vector_t *lambdas, size_t i,
         i = parse_skip_white(source, i);
         lambda.type.begin = i;
         if (source->data[i] == '(') {
-            if ((i = parse(source, lambdas, i, false, true)) == ERROR) {
+            if ((i = parse(source, lambdas, i, false, true)) == -1) {
                 lambda_vector_destroy(&parens);
-                return ERROR;
+                return -1;
             }
         }
         i = parse_skip_to(source, i, '(');
         lambda.type.length = i - lambda.type.begin;
         lambda.args.begin = i;
-        if ((i = parse(source, lambdas, i, false, true)) == ERROR) {
+        if ((i = parse(source, lambdas, i, false, true)) == -1) {
             lambda_vector_destroy(&parens);
-            return ERROR;
+            return -1;
         }
         lambda.args.length = i - lambda.args.begin + 1;
         i = parse_skip_to(source, i, '{');
         lambda.body.begin = i;
+        lambda.line = source->line;
     }
 
     size_t j = i;
     while (i < source->length) {
         if (source->data[i] == '"') {
-            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
+            if (!special && (i = parse_word(source, lambdas, j, i)) == -1)
                 goto parse_error;
             j = i = parse_skip_string(source, i+1, source->data[i]);
         } else if (source->data[i] == '\'') {
-            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
+            if (!special && (i = parse_word(source, lambdas, j, i)) == -1)
                 goto parse_error;
             j = i = parse_skip_string(source, i+1, source->data[i]);
         } else if (strchr("([{", source->data[i])) {
-            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
+            if (!special && (i = parse_word(source, lambdas, j, i)) == -1)
                 goto parse_error;
             lambda_vector_push_char(&parens, strchr("([{)]}", source->data[i])[3]);
             j = ++i;
@@ -266,11 +267,11 @@ static size_t parse(lambda_source_t *source, lambda_vector_t *lambdas, size_t i,
                     return i;
                 }
             }
-            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
+            if (!special && (i = parse_word(source, lambdas, j, i)) == -1)
                 goto parse_error;
             j = ++i;
         } else if (source->data[i] != '_' && !isalnum(source->data[i])) {
-            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
+            if (!special && (i = parse_word(source, lambdas, j, i)) == -1)
                 goto parse_error;
             j = ++i;
         } else
@@ -282,7 +283,7 @@ static size_t parse(lambda_source_t *source, lambda_vector_t *lambdas, size_t i,
 
 parse_error:
     lambda_vector_destroy(&parens);
-    return ERROR;
+    return -1;
 }
 
 /* Generator */
@@ -290,7 +291,11 @@ int generate_compare(const void *lhs, const void *rhs) {
     const lambda_t *a = (const lambda_t *)lhs;
     const lambda_t *b = (const lambda_t *)rhs;
 
-    return a->start > b->start;
+    return a->start - b->start;
+}
+
+static void generate_marker(const char *file, size_t line) {
+    printf("# %zu \"%s\"\n", line, file);
 }
 
 static void generate_sliced(const char *source, size_t i, size_t j, lambda_vector_t *lambdas, size_t k) {
@@ -325,17 +330,20 @@ static void generate_begin(lambda_source_t *source, lambda_t *lambda, size_t nam
         name,
         (int)(lambda->args.length), source->data + lambda->args.begin
     );
+
 }
 
 static void generate(lambda_source_t *source) {
     lambda_vector_t lambdas;
     lambda_vector_init(&lambdas, true);
-    if (parse(source, &lambdas, 0, false, false) == ERROR) {
+    if (parse(source, &lambdas, 0, false, false) == -1) {
         lambda_vector_destroy(&lambdas);
         return;
     }
 
     qsort(lambdas.funcs, lambdas.elements, sizeof(lambda_t), &generate_compare);
+
+    generate_marker(source->file, 1);
 
     /* Enable this to print prototypes first */
 #if 0
