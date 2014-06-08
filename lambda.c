@@ -36,6 +36,7 @@ typedef struct {
 
 typedef struct {
     const char *file;
+    char        uuid[128];
     char       *data;
     size_t      length;
     size_t      line;
@@ -298,21 +299,23 @@ static void generate_marker(const char *file, size_t line) {
     printf("# %zu \"%s\"\n", line, file);
 }
 
-static void generate_sliced(const char *source, size_t i, size_t j, lambda_vector_t *lambdas, size_t k) {
+static void generate_sliced(const char *source, size_t i, size_t j, lambda_vector_t *lambdas, size_t k, const char *uuid) {
     while (j) {
         if (k == lambdas->elements || lambdas->funcs[k].start > i + j) {
             printf("%.*s", (int)(j), source + i);
             return;
         }
 
-        printf("%.*s ({ %.*s lambda_%zu%.*s; &lambda_%zu; })",
+        printf("%.*s ({ %.*s lambda_%s_%zu%.*s; &lambda_%s_%zu; })",
             (int)(lambdas->funcs[k].start - i),
             source + i,
             (int)(lambdas->funcs[k].type.length),
             source + lambdas->funcs[k].type.begin,
+            uuid,
             k,
             (int)(lambdas->funcs[k].args.length),
             source + lambdas->funcs[k].args.begin,
+            uuid,
             k
         );
 
@@ -325,12 +328,20 @@ static void generate_sliced(const char *source, size_t i, size_t j, lambda_vecto
 }
 
 static void generate_begin(lambda_source_t *source, lambda_t *lambda, size_t name) {
-    printf("%.*s lambda_%zu%.*s",
+    printf("%.*s lambda_%s_%zu%.*s",
         (int)(lambda->type.length), source->data + lambda->type.begin,
+        source->uuid,
         name,
         (int)(lambda->args.length), source->data + lambda->args.begin
     );
 
+}
+
+static void generate_uuid(lambda_source_t *source) {
+    /* Unique identifiers via file name */
+    char *find = strchr(source->file, '.');
+    memcpy(source->uuid, source->file, find - source->file);
+    source->uuid[find - source->file] = '\0';
 }
 
 static void generate(lambda_source_t *source) {
@@ -343,6 +354,7 @@ static void generate(lambda_source_t *source) {
 
     qsort(lambdas.funcs, lambdas.elements, sizeof(lambda_t), &generate_compare);
 
+    generate_uuid(source);
     generate_marker(source->file, 1);
 
     /* Enable this to print prototypes first */
@@ -354,13 +366,13 @@ static void generate(lambda_source_t *source) {
     }
 #endif
 
-    generate_sliced(source->data, 0, source->length, &lambdas, 0);
+    generate_sliced(source->data, 0, source->length, &lambdas, 0, source->uuid);
 
     for (size_t i = 0; i < lambdas.elements; i++) {
         lambda_t *lambda = &lambdas.funcs[i];
         generate_begin(source, lambda, i);
         printf(" ");
-        generate_sliced(source->data, lambda->body.begin, lambda->body.length + 1, &lambdas, i + 1);
+        generate_sliced(source->data, lambda->body.begin, lambda->body.length + 1, &lambdas, i + 1, source->uuid);
         printf("\n");
     }
 
