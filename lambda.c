@@ -39,6 +39,11 @@ typedef struct {
 } lambda_range_t;
 
 typedef struct {
+    size_t pos;
+    size_t line;
+} lambda_position_t;
+
+typedef struct {
     const char *file;
     char        uuid[128];
     char       *data;
@@ -51,13 +56,16 @@ typedef struct {
     lambda_range_t type;
     lambda_range_t args;
     lambda_range_t body;
+    size_t         type_line;
+    size_t         body_line;
+    size_t         end_line;
 } lambda_t;
 
 typedef struct {
     union {
-        char     *chars;
-        lambda_t *funcs;
-        size_t   *positions;
+        char              *chars;
+        lambda_t          *funcs;
+        lambda_position_t *positions;
     };
     size_t size;
     size_t elements;
@@ -100,9 +108,11 @@ static inline void lambda_vector_push_lambda(lambda_vector_t *vec, lambda_t lamb
     vec->funcs[vec->elements++] = lambda;
 }
 
-static inline void lambda_vector_push_position(lambda_vector_t *vec, size_t pos) {
+static inline void lambda_vector_push_position(lambda_vector_t *vec, size_t pos, size_t line) {
     lambda_vector_resize(vec);
-    vec->positions[vec->elements++] = pos;
+    vec->positions[vec->elements].pos  = pos;
+    vec->positions[vec->elements].line = line;
+    vec->elements++;
 }
 
 /* Source */
@@ -221,6 +231,7 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
         lambda.start = i - 6;
         i = parse_skip_white(source, i);
         lambda.type.begin = i;
+        lambda.type_line = source->line;
         if (source->data[i] == '(') {
             if ((i = parse(source, data, i, false, true)) == ERROR) {
                 lambda_vector_destroy(&parens);
@@ -237,6 +248,7 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
         lambda.args.length = i - lambda.args.begin + 1;
         i = parse_skip_to(source, i, '{');
         lambda.body.begin = i;
+        lambda.body_line  = source->line;
     }
 
     size_t j = i;
@@ -244,11 +256,13 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
         if (mark && !parens.elements) {
             if (protomove) {
                 if (isspace(source->data[i])) {
+                    if (source->data[i] == '\n')
+                        source->line++;
                     protopos = j = ++i;
                     continue;
                 }
                 protomove = false;
-                lambda_vector_push_position(&data->positions, protopos);
+                lambda_vector_push_position(&data->positions, protopos, source->line);
             }
 
             if (source->data[i] == ';') {
@@ -312,6 +326,7 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
             if (inlambda) {
                 if (source->data[i] == '}' && !parens.elements) {
                     lambda.body.length = i - lambda.body.begin;
+                    lambda.end_line = source->line;
                     lambda_vector_push_lambda(&data->lambdas, lambda);
                     lambda_vector_destroy(&parens);
                     return i;
@@ -349,8 +364,11 @@ static inline int generate_compare(const void *lhs, const void *rhs) {
     return a->start - b->start;
 }
 
-static inline int compare_size(const void *lhs, const void *rhs) {
-    return *((const size_t*)lhs) - *((const size_t*)rhs);
+static inline int compare_position(const void *lhs, const void *rhs) {
+    const lambda_position_t *a = (const lambda_position_t *)lhs;
+    const lambda_position_t *b = (const lambda_position_t *)rhs;
+
+    return a->pos - b->pos;
 }
 
 static inline void generate_marker(FILE *out, const char *file, size_t line) {
@@ -382,18 +400,85 @@ static void generate_sliced(FILE *out, const char *source, size_t pos, size_t le
     }
 }
 
-static inline void generate_begin(FILE *out, lambda_source_t *source, lambda_t *lambda, size_t name) {
-    fwrite(source->data + lambda->type.begin, lambda->type.length, 1, out);
-    fprintf(out, " lambda_%s_%zu", source->uuid, name);
-    fwrite(source->data + lambda->args.begin, lambda->args.length, 1, out);
+static inline void generate_begin(FILE *out, lambda_source_t *source, lambda_vector_t *lambdas, size_t idx) {
+    fprintf(out, "\n#line %zu\n", lambdas->funcs[idx].type_line);
+    fwrite(source->data + lambdas->funcs[idx].type.begin, lambdas->funcs[idx].type.length, 1, out);
+    fprintf(out, " lambda_%s_%zu", source->uuid, idx);
+    fwrite(source->data + lambdas->funcs[idx].args.begin, lambdas->funcs[idx].args.length, 1, out);
 }
 
 static inline void generate_uuid(lambda_source_t *source) {
     /* Unique identifiers via file name */
-    char *find = strchr(source->file, '.');
+    /*char *find = strchr(source->file, '.');
     memcpy(source->uuid, source->file, find - source->file);
-    source->uuid[find - source->file] = '\0';
+    source->uuid[find - source->file] = '\0';*/
+    memcpy(source->uuid, "_", 2);
 }
+
+static size_t next_prototype_position(parse_data_t *data, size_t lam, size_t proto) {
+    if (lam == data->lambdas.elements)
+        return data->positions.elements;
+    for (; proto != data->positions.elements; ++proto) {
+        if (data->positions.positions[proto].pos > data->lambdas.funcs[lam].start)
+            return proto-1;
+    }
+    return data->positions.elements-1;
+}
+
+static void generate_prototypes(FILE *out, lambda_source_t *source, parse_data_t *data, size_t lam, size_t proto) {
+    size_t end = (proto+1) == data->positions.elements ? (size_t)-1 : data->positions.positions[proto].pos;
+    for (; lam != data->lambdas.elements; ++lam) {
+        if (data->lambdas.funcs[lam].start >= end)
+            break;
+        generate_begin(out, source, &data->lambdas, lam);
+        fprintf(out, ";");
+    }
+    fprintf(out, "\n");
+}
+
+/* when generating the actual code we also take prototype-positioning into account */
+static void generate_code(FILE *out, lambda_source_t *source, size_t pos, size_t len, parse_data_t *data, size_t lam, const char *uuid) {
+    /* we know that positions always has at least 1 element, the 0, so the first search is there */
+    size_t proto = next_prototype_position(data, lam, 1);
+    while (len) {
+        if (lam == data->lambdas.elements || data->lambdas.funcs[lam].start > pos + len) {
+            fwrite(source->data + pos, len, 1, out);
+            return;
+        }
+
+        if (proto != data->positions.elements) {
+            lambda_position_t *lambdapos = &data->positions.positions[proto];
+            size_t point = lambdapos->pos;
+            if (pos < point && pos+len >= point) {
+                /* we insert prototypes here! */
+                size_t length = point - pos;
+                fwrite(source->data + pos, length, 1, out);
+                generate_prototypes(out, source, data, lam, proto);
+                fprintf(out, "\n#line %zu\n", lambdapos->line);
+                len -= length;
+                pos += length;
+            }
+        }
+
+        lambda_t *lambda = &data->lambdas.funcs[lam];
+        size_t    length = lambda->body.begin + lambda->body.length + 1 - pos;
+
+        fwrite(source->data + pos, lambda->start - pos, 1, out);
+        fprintf(out, " ({");
+        fwrite(source->data + lambda->type.begin, lambda->type.length, 1, out);
+        fprintf(out, " lambda_%s_%zu", uuid, lam);
+        fwrite(source->data + lambda->args.begin, lambda->args.length, 1, out);
+        fprintf(out, "; &lambda_%s_%zu; })", uuid, lam);
+
+        len -= length;
+        pos += length;
+
+        for (++lam; lam != data->lambdas.elements && data->lambdas.funcs[lam].start < pos; ++lam)
+            ;
+        proto = next_prototype_position(data, lam, proto);
+    }
+}
+
 
 static void generate(FILE *out, lambda_source_t *source) {
     parse_data_t data;
@@ -406,16 +491,17 @@ static void generate(FILE *out, lambda_source_t *source) {
     }
 
     qsort(data.lambdas.funcs, data.lambdas.elements, sizeof(lambda_t), &generate_compare);
-    qsort(data.positions.positions, data.positions.elements, sizeof(size_t), &compare_size);
+    qsort(data.positions.positions, data.positions.elements, sizeof(lambda_position_t), &compare_position);
 
     generate_uuid(source);
     generate_marker(out, source->file, 1);
 
-    generate_sliced(out, source->data, 0, source->length, &data, 0, source->uuid);
+    generate_code(out, source, 0, source->length, &data, 0, source->uuid);
 
     for (size_t i = 0; i < data.lambdas.elements; i++) {
         lambda_t *lambda = &data.lambdas.funcs[i];
-        generate_begin(out, source, lambda, i);
+        generate_begin(out, source, &data.lambdas, i);
+        fprintf(out, "\n#line %zu\n", lambda->body_line);
         generate_sliced(out, source->data, lambda->body.begin, lambda->body.length + 1, &data, i + 1, source->uuid);
     }
 
