@@ -400,7 +400,7 @@ static void generate_sliced(FILE *out, const char *source, size_t pos, size_t le
 }
 
 static inline void generate_begin(FILE *out, lambda_source_t *source, lambda_vector_t *lambdas, size_t idx) {
-    fprintf(out, "\n#line %zu\n", lambdas->funcs[idx].type_line);
+    fprintf(out, "\n#line %zu\nstatic ", lambdas->funcs[idx].type_line);
     fwrite(source->data + lambdas->funcs[idx].type.begin, lambdas->funcs[idx].type.length, 1, out);
     fprintf(out, " lambda_%zu", idx);
     fwrite(source->data + lambdas->funcs[idx].args.begin, lambdas->funcs[idx].args.length, 1, out);
@@ -455,11 +455,7 @@ static void generate_code(FILE *out, lambda_source_t *source, size_t pos, size_t
         size_t    length = lambda->body.begin + lambda->body.length + 1 - pos;
 
         fwrite(source->data + pos, lambda->start - pos, 1, out);
-        fprintf(out, " ({");
-        fwrite(source->data + lambda->type.begin, lambda->type.length, 1, out);
-        fprintf(out, " lambda_%zu", lam);
-        fwrite(source->data + lambda->args.begin, lambda->args.length, 1, out);
-        fprintf(out, "; &lambda_%zu; })", lam);
+        fprintf(out, "&lambda_%zu", lam);
 
         len -= length;
         pos += length;
