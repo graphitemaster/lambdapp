@@ -281,26 +281,26 @@ static inline int generate_compare(const void *lhs, const void *rhs) {
     return a->start - b->start;
 }
 
-static inline void generate_marker(const char *file, size_t line) {
-    printf("# %zu \"%s\"\n", line, file);
+static inline void generate_marker(FILE *out, const char *file, size_t line) {
+    fprintf(out, "# %zu \"%s\"\n", line, file);
 }
 
-static void generate_sliced(const char *source, size_t i, size_t j, lambda_vector_t *lambdas, size_t k, const char *uuid) {
+static void generate_sliced(FILE *out, const char *source, size_t i, size_t j, lambda_vector_t *lambdas, size_t k, const char *uuid) {
     while (j) {
         if (k == lambdas->elements || lambdas->funcs[k].start > i + j) {
-            fwrite(source + i, j, 1, stdout);
+            fwrite(source + i, j, 1, out);
             return;
         }
 
         lambda_t *lambda = &lambdas->funcs[k];
         size_t    length = lambda->body.begin + lambda->body.length + 1 - i;
 
-        fwrite(source + i, lambda->start - i, 1, stdout);
-        printf(" ({");
-        fwrite(source + lambda->type.begin, lambda->type.length, 1, stdout);
-        printf(" lambda_%s_%zu", uuid, k);
-        fwrite(source + lambda->args.begin, lambda->args.length, 1, stdout);
-        printf("; &lambda_%s_%zu; })", uuid, k);
+        fwrite(source + i, lambda->start - i, 1, out);
+        fprintf(out, " ({");
+        fwrite(source + lambda->type.begin, lambda->type.length, 1, out);
+        fprintf(out, " lambda_%s_%zu", uuid, k);
+        fwrite(source + lambda->args.begin, lambda->args.length, 1, out);
+        fprintf(out, "; &lambda_%s_%zu; })", uuid, k);
 
         j -= length;
         i += length;
@@ -310,10 +310,10 @@ static void generate_sliced(const char *source, size_t i, size_t j, lambda_vecto
     }
 }
 
-static inline void generate_begin(lambda_source_t *source, lambda_t *lambda, size_t name) {
-    fwrite(source->data + lambda->type.begin, lambda->type.length, 1, stdout);
-    printf(" lambda_%s_%zu", source->uuid, name);
-    fwrite(source->data + lambda->args.begin, lambda->args.length, 1, stdout);
+static inline void generate_begin(FILE *out, lambda_source_t *source, lambda_t *lambda, size_t name) {
+    fwrite(source->data + lambda->type.begin, lambda->type.length, 1, out);
+    fprintf(out, " lambda_%s_%zu", source->uuid, name);
+    fwrite(source->data + lambda->args.begin, lambda->args.length, 1, out);
 }
 
 static inline void generate_uuid(lambda_source_t *source) {
@@ -323,7 +323,7 @@ static inline void generate_uuid(lambda_source_t *source) {
     source->uuid[find - source->file] = '\0';
 }
 
-static void generate(lambda_source_t *source) {
+static void generate(FILE *out, lambda_source_t *source) {
     lambda_vector_t lambdas;
     lambda_vector_init(&lambdas, true);
     if (parse(source, &lambdas, 0, false, false) == ERROR) {
@@ -334,15 +334,18 @@ static void generate(lambda_source_t *source) {
     qsort(lambdas.funcs, lambdas.elements, sizeof(lambda_t), &generate_compare);
 
     generate_uuid(source);
-    generate_marker(source->file, 1);
+    generate_marker(out, source->file, 1);
 
-    generate_sliced(source->data, 0, source->length, &lambdas, 0, source->uuid);
+    generate_sliced(out, source->data, 0, source->length, &lambdas, 0, source->uuid);
 
     for (size_t i = 0; i < lambdas.elements; i++) {
         lambda_t *lambda = &lambdas.funcs[i];
-        generate_begin(source, lambda, i);
-        generate_sliced(source->data, lambda->body.begin, lambda->body.length + 1, &lambdas, i + 1, source->uuid);
+        generate_begin(out, source, lambda, i);
+        generate_sliced(out, source->data, lambda->body.begin, lambda->body.length + 1, &lambdas, i + 1, source->uuid);
     }
+
+    /* there are cases where we get no newline at the end of the file */
+    fprintf(out, "\n");
 
     lambda_vector_destroy(&lambdas);
 }
@@ -359,7 +362,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    generate(&source);
+    generate(stdout, &source);
     parse_close(&source);
 
     return 0;
