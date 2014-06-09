@@ -45,7 +45,6 @@ typedef struct {
 
 typedef struct {
     const char *file;
-    char        uuid[128];
     char       *data;
     size_t      length;
     size_t      line;
@@ -375,7 +374,7 @@ static inline void generate_marker(FILE *out, const char *file, size_t line) {
     fprintf(out, "# %zu \"%s\"\n", line, file);
 }
 
-static void generate_sliced(FILE *out, const char *source, size_t pos, size_t len, parse_data_t *data, size_t lam, const char *uuid) {
+static void generate_sliced(FILE *out, const char *source, size_t pos, size_t len, parse_data_t *data, size_t lam) {
     while (len) {
         if (lam == data->lambdas.elements || data->lambdas.funcs[lam].start > pos + len) {
             fwrite(source + pos, len, 1, out);
@@ -388,9 +387,9 @@ static void generate_sliced(FILE *out, const char *source, size_t pos, size_t le
         fwrite(source + pos, lambda->start - pos, 1, out);
         fprintf(out, " ({");
         fwrite(source + lambda->type.begin, lambda->type.length, 1, out);
-        fprintf(out, " lambda_%s_%zu", uuid, lam);
+        fprintf(out, " lambda_%zu", lam);
         fwrite(source + lambda->args.begin, lambda->args.length, 1, out);
-        fprintf(out, "; &lambda_%s_%zu; })", uuid, lam);
+        fprintf(out, "; &lambda_%zu; })", lam);
 
         len -= length;
         pos += length;
@@ -403,16 +402,8 @@ static void generate_sliced(FILE *out, const char *source, size_t pos, size_t le
 static inline void generate_begin(FILE *out, lambda_source_t *source, lambda_vector_t *lambdas, size_t idx) {
     fprintf(out, "\n#line %zu\n", lambdas->funcs[idx].type_line);
     fwrite(source->data + lambdas->funcs[idx].type.begin, lambdas->funcs[idx].type.length, 1, out);
-    fprintf(out, " lambda_%s_%zu", source->uuid, idx);
+    fprintf(out, " lambda_%zu", idx);
     fwrite(source->data + lambdas->funcs[idx].args.begin, lambdas->funcs[idx].args.length, 1, out);
-}
-
-static inline void generate_uuid(lambda_source_t *source) {
-    /* Unique identifiers via file name */
-    /*char *find = strchr(source->file, '.');
-    memcpy(source->uuid, source->file, find - source->file);
-    source->uuid[find - source->file] = '\0';*/
-    memcpy(source->uuid, "_", 2);
 }
 
 static size_t next_prototype_position(parse_data_t *data, size_t lam, size_t proto) {
@@ -437,7 +428,7 @@ static void generate_prototypes(FILE *out, lambda_source_t *source, parse_data_t
 }
 
 /* when generating the actual code we also take prototype-positioning into account */
-static void generate_code(FILE *out, lambda_source_t *source, size_t pos, size_t len, parse_data_t *data, size_t lam, const char *uuid) {
+static void generate_code(FILE *out, lambda_source_t *source, size_t pos, size_t len, parse_data_t *data, size_t lam) {
     /* we know that positions always has at least 1 element, the 0, so the first search is there */
     size_t proto = next_prototype_position(data, lam, 1);
     while (len) {
@@ -466,9 +457,9 @@ static void generate_code(FILE *out, lambda_source_t *source, size_t pos, size_t
         fwrite(source->data + pos, lambda->start - pos, 1, out);
         fprintf(out, " ({");
         fwrite(source->data + lambda->type.begin, lambda->type.length, 1, out);
-        fprintf(out, " lambda_%s_%zu", uuid, lam);
+        fprintf(out, " lambda_%zu", lam);
         fwrite(source->data + lambda->args.begin, lambda->args.length, 1, out);
-        fprintf(out, "; &lambda_%s_%zu; })", uuid, lam);
+        fprintf(out, "; &lambda_%zu; })", lam);
 
         len -= length;
         pos += length;
@@ -493,16 +484,15 @@ static void generate(FILE *out, lambda_source_t *source) {
     qsort(data.lambdas.funcs, data.lambdas.elements, sizeof(lambda_t), &generate_compare);
     qsort(data.positions.positions, data.positions.elements, sizeof(lambda_position_t), &compare_position);
 
-    generate_uuid(source);
     generate_marker(out, source->file, 1);
 
-    generate_code(out, source, 0, source->length, &data, 0, source->uuid);
+    generate_code(out, source, 0, source->length, &data, 0);
 
     for (size_t i = 0; i < data.lambdas.elements; i++) {
         lambda_t *lambda = &data.lambdas.funcs[i];
         generate_begin(out, source, &data.lambdas, i);
         fprintf(out, "\n#line %zu\n", lambda->body_line);
-        generate_sliced(out, source->data, lambda->body.begin, lambda->body.length + 1, &data, i + 1, source->uuid);
+        generate_sliced(out, source->data, lambda->body.begin, lambda->body.length + 1, &data, i + 1);
     }
 
     /* there are cases where we get no newline at the end of the file */
