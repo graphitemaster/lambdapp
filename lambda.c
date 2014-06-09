@@ -24,10 +24,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
-#include <ctype.h>
 #include <stdio.h>
 #include <errno.h>
 #include <stdbool.h>
+
+#define isalpha(a) ((((unsigned)(a)|32)-'a') < 26)
+#define isdigit(a) (((unsigned)(a)-'0') < 10)
+#define isalnum(a) (isalpha(a) || isdigit(a))
+#define isspace(a) (((a) >= '\t' && (a) <= '\r') || (a) == ' ')
 
 typedef struct {
     size_t begin;
@@ -60,30 +64,30 @@ typedef struct {
 } lambda_vector_t;
 
 /* Vector */
-static void lambda_vector_init(lambda_vector_t *vec, bool funcs) {
+static inline void lambda_vector_init(lambda_vector_t *vec, bool funcs) {
     vec->length   = 32;
     vec->size     = funcs ? sizeof(lambda_t) : 1;
     vec->chars    = (char *)malloc(vec->length * vec->size);
     vec->elements = 0;
 }
 
-static void lambda_vector_destroy(lambda_vector_t *vec) {
+static inline void lambda_vector_destroy(lambda_vector_t *vec) {
     free(vec->chars);
 }
 
-static void lambda_vector_resize(lambda_vector_t *vec) {
-    if (vec->elements == vec->length) {
-        vec->length <<= 1;
-        vec->chars    = (char *)realloc(vec->chars, vec->length * vec->size);
-    }
+static inline void lambda_vector_resize(lambda_vector_t *vec) {
+    if (vec->elements != vec->length)
+        return;
+    vec->length <<= 1;
+    vec->chars    = (char *)realloc(vec->chars, vec->length * vec->size);
 }
 
-static void lambda_vector_push_char(lambda_vector_t *vec, char ch) {
+static inline void lambda_vector_push_char(lambda_vector_t *vec, char ch) {
     lambda_vector_resize(vec);
     vec->chars[vec->elements++] = ch;
 }
 
-static void lambda_vector_push_lambda(lambda_vector_t *vec, lambda_t lambda) {
+static inline void lambda_vector_push_lambda(lambda_vector_t *vec, lambda_t lambda) {
     lambda_vector_resize(vec);
     vec->funcs[vec->elements++] = lambda;
 }
@@ -117,26 +121,24 @@ parse_open_error_data:
     return false;
 }
 
-static void parse_close(lambda_source_t *source) {
+static inline void parse_close(lambda_source_t *source) {
     free(source->data);
 }
 
 /* Parser */
-static size_t parse_skip_string(lambda_source_t *source, size_t i, char check) {
+static inline size_t parse_skip_string(lambda_source_t *source, size_t i, char check) {
     while (i != source->length) {
-        if (source->data[i] == check) {
-            ++i;
-            break;
-        } else if (source->data[i] == '\\') {
+        if (source->data[i] == check)
+            return i + 1;
+        else if (source->data[i] == '\\')
             if (++i == source->length)
                 break;
-        }
-        i++;
+        ++i;
     }
     return i;
 }
 
-static size_t parse_skip_white(lambda_source_t *source, size_t i) {
+static inline size_t parse_skip_white(lambda_source_t *source, size_t i) {
     while (i != source->length && isspace(source->data[i])) {
         if (source->data[i] == '\n')
             source->line++;
@@ -145,7 +147,7 @@ static size_t parse_skip_white(lambda_source_t *source, size_t i) {
     return i;
 }
 
-static size_t parse_skip_to(lambda_source_t *source, size_t i, char check) {
+static inline size_t parse_skip_to(lambda_source_t *source, size_t i, char check) {
     while (i != source->length && source->data[i] != check) {
         if (source->data[i] == '\n')
             source->line++;
@@ -174,22 +176,10 @@ static size_t parse_word(lambda_source_t *source, lambda_vector_t *lambdas, size
         source->line++;
     else if (!strncmp(source->data + i, "//", 2)) {
         /* Single line comments */
-        while (i != source->length) {
-            if (source->data[i] == '\n') {
-                ++i;
-                break;
-            }
-            ++i;
-        }
+        i = strchr(source->data + i, '\n') - source->data;
     } else if (!strncmp(source->data + i, "/*", 2)) {
         /* Multi line comments */
-        while (i != source->length) {
-            if (!strncmp(source->data + i, "*/", 2)) {
-                i += 2;
-                break;
-            }
-            ++i;
-        }
+        i = strstr(source->data + i, "*/") - source->data;
     }
     return i;
 }
@@ -250,10 +240,6 @@ static size_t parse(lambda_source_t *source, lambda_vector_t *lambdas, size_t i,
                 parse_error(source, "mismatching `%c' and `%c'", back, source->data[i]);
                 goto parse_error;
             }
-            //if (source->data[i + 1] == back) {
-            //    parse_error(source, "unexpected token `%c'", back);
-            //    goto parse_error;
-            //}
             if (parens.elements != 0)
                 parens.elements--;
             if (special && source->data[i] == ')' && !parens.elements) {
@@ -288,56 +274,49 @@ parse_error:
 }
 
 /* Generator */
-int generate_compare(const void *lhs, const void *rhs) {
+static inline int generate_compare(const void *lhs, const void *rhs) {
     const lambda_t *a = (const lambda_t *)lhs;
     const lambda_t *b = (const lambda_t *)rhs;
 
     return a->start - b->start;
 }
 
-static void generate_marker(const char *file, size_t line) {
+static inline void generate_marker(const char *file, size_t line) {
     printf("# %zu \"%s\"\n", line, file);
 }
 
 static void generate_sliced(const char *source, size_t i, size_t j, lambda_vector_t *lambdas, size_t k, const char *uuid) {
     while (j) {
         if (k == lambdas->elements || lambdas->funcs[k].start > i + j) {
-            printf("%.*s", (int)(j), source + i);
+            fwrite(source + i, j, 1, stdout);
             return;
         }
 
-        printf("%.*s ({ %.*s lambda_%s_%zu%.*s; &lambda_%s_%zu; })",
-            (int)(lambdas->funcs[k].start - i),
-            source + i,
-            (int)(lambdas->funcs[k].type.length),
-            source + lambdas->funcs[k].type.begin,
-            uuid,
-            k,
-            (int)(lambdas->funcs[k].args.length),
-            source + lambdas->funcs[k].args.begin,
-            uuid,
-            k
-        );
+        lambda_t *lambda = &lambdas->funcs[k];
+        size_t    length = lambda->body.begin + lambda->body.length + 1 - i;
 
-        j -= lambdas->funcs[k].body.begin + lambdas->funcs[k].body.length + 1 - i;
-        i += lambdas->funcs[k].body.begin + lambdas->funcs[k].body.length + 1 - i;
+        fwrite(source + i, lambda->start - i, 1, stdout);
+        printf(" ({");
+        fwrite(source + lambda->type.begin, lambda->type.length, 1, stdout);
+        printf(" lambda_%s_%zu", uuid, k);
+        fwrite(source + lambda->args.begin, lambda->args.length, 1, stdout);
+        printf("; &lambda_%s_%zu; })", uuid, k);
+
+        j -= length;
+        i += length;
 
         for (++k; k != lambdas->elements && lambdas->funcs[k].start < i; k++)
             ;
     }
 }
 
-static void generate_begin(lambda_source_t *source, lambda_t *lambda, size_t name) {
-    printf("%.*s lambda_%s_%zu%.*s",
-        (int)(lambda->type.length), source->data + lambda->type.begin,
-        source->uuid,
-        name,
-        (int)(lambda->args.length), source->data + lambda->args.begin
-    );
-
+static inline void generate_begin(lambda_source_t *source, lambda_t *lambda, size_t name) {
+    fwrite(source->data + lambda->type.begin, lambda->type.length, 1, stdout);
+    printf(" lambda_%s_%zu", source->uuid, name);
+    fwrite(source->data + lambda->args.begin, lambda->args.length, 1, stdout);
 }
 
-static void generate_uuid(lambda_source_t *source) {
+static inline void generate_uuid(lambda_source_t *source) {
     /* Unique identifiers via file name */
     char *find = strchr(source->file, '.');
     memcpy(source->uuid, source->file, find - source->file);
@@ -357,23 +336,12 @@ static void generate(lambda_source_t *source) {
     generate_uuid(source);
     generate_marker(source->file, 1);
 
-    /* Enable this to print prototypes first */
-#if 0
-    for (size_t i = 0; i < lambdas.elements; i++) {
-        lambda_t *lambda = &lambdas.funcs[i];
-        generate_begin(source, lambda, i);
-        printf(";\n");
-    }
-#endif
-
     generate_sliced(source->data, 0, source->length, &lambdas, 0, source->uuid);
 
     for (size_t i = 0; i < lambdas.elements; i++) {
         lambda_t *lambda = &lambdas.funcs[i];
         generate_begin(source, lambda, i);
-        printf(" ");
         generate_sliced(source->data, lambda->body.begin, lambda->body.length + 1, &lambdas, i + 1, source->uuid);
-        printf("\n");
     }
 
     lambda_vector_destroy(&lambdas);
