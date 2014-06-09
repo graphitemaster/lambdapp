@@ -200,13 +200,13 @@ static size_t parse_word(lambda_source_t *source, parse_data_t *data, size_t j, 
 static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool inlambda, bool special) {
     lambda_vector_t parens;
     lambda_t        lambda;
-    bool            mark_positions = (!inlambda && !special);
-    size_t          proto_pos = i;
-    bool            proto_move = true;
+    bool            mark = (!inlambda && !special);
+    size_t          protopos = i;
+    bool            protomove = true;
     bool            preprocessor = false;
-    /* mark_positions actually means this is the outer most call and we should
+    /* 'mark' actually means this is the outer most call and we should
      * remember where to put prototypes now!
-     * when proto_move is true we move the proto_pos along whitespace so that
+     * when protomove is true we move the protopos along whitespace so that
      * the lambdas don't get stuck to the tail of hte previous functions.
      * Also we need to put lambdas after #include lines so if we encounter
      * a preprocessor directive we create another position marker starting
@@ -241,22 +241,22 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
 
     size_t j = i;
     while (i < source->length) {
-        if (mark_positions && !parens.elements) {
-            if (proto_move) {
+        if (mark && !parens.elements) {
+            if (protomove) {
                 if (isspace(source->data[i])) {
-                    proto_pos = j = ++i;
+                    protopos = j = ++i;
                     continue;
                 }
-                proto_move = false;
-                lambda_vector_push_position(&data->positions, proto_pos);
+                protomove = false;
+                lambda_vector_push_position(&data->positions, protopos);
             }
 
             if (source->data[i] == ';') {
                 if (!special && (i = parse_word(source, data, j, i)) == ERROR)
                     goto parse_error;
                 j = ++i;
-                proto_move = true;
-                proto_pos  = i;
+                protomove = true;
+                protopos  = i;
                 continue;
             }
 
@@ -264,8 +264,8 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
                 if (!special && (i = parse_word(source, data, j, i)) == ERROR)
                     goto parse_error;
                 j = ++i;
-                proto_move = false;
-                proto_pos  = i;
+                protomove = false;
+                protopos  = i;
                 preprocessor = true;
                 continue;
             }
@@ -273,8 +273,8 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
                 if (!special && (i = parse_word(source, data, j, i)) == ERROR)
                     goto parse_error;
                 j = ++i;
-                proto_move = true;
-                proto_pos  = i;
+                protomove = true;
+                protopos  = i;
                 preprocessor = false;
                 continue;
             }
@@ -317,13 +317,13 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
                     return i;
                 }
             }
-            bool mark = (mark_positions && !parens.elements && source->data[i] == '}');
+            bool domark = (mark && !parens.elements && source->data[i] == '}');
             if (!special && (i = parse_word(source, data, j, i)) == ERROR)
                 goto parse_error;
             j = ++i;
-            if (mark) {
-                proto_pos = i;
-                proto_move = true;
+            if (domark) {
+                protopos = i;
+                protomove = true;
             }
         } else if (source->data[i] != '_' && !isalnum(source->data[i])) {
             if (!special && (i = parse_word(source, data, j, i)) == ERROR)
