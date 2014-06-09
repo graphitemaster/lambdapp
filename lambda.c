@@ -498,15 +498,59 @@ static void generate(FILE *out, lambda_source_t *source) {
     lambda_vector_destroy(&data.positions);
 }
 
+static void usage(const char *prog, FILE *out) {
+    fprintf(out, "usage: %s <file>\n", prog);
+}
+
+static void version(FILE *out) {
+    fprintf(out, "lambdapp 0.1\n");
+}
+
 int main(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s <file>\n", *argv);
+    lambda_source_t source;
+    const char *file = NULL;
+
+    int i = 1;
+    for (; i != argc; ++i) {
+        if (!strcmp(argv[i], "--")) {
+            ++i;
+            break;
+        }
+        if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
+            usage(argv[0], stdout);
+            return 0;
+        }
+        if (!strcmp(argv[i], "-V") || !strcmp(argv[i], "--version")) {
+            version(stdout);
+            return 0;
+        }
+        if (argv[i][0] == '-') {
+            fprintf(stderr, "%s: unrecognized option: %s\n", argv[0], argv[i]);
+            usage(argv[0], stderr);
+            return 1;
+        }
+        if (file) {
+            fprintf(stderr, "%s: only 1 file allowed\n", argv[0]);
+            usage(argv[0], stderr);
+            return 1;
+        }
+        file = argv[i];
+    }
+    if (!file && i != argc)
+        file = argv[i++];
+    if (i != argc) {
+        fprintf(stderr, "%s: only 1 file allowed\n", argv[0]);
+        usage(argv[0], stderr);
         return 1;
     }
 
-    lambda_source_t source;
-    if (!parse_open(&source, argv[1])) {
-        fprintf(stderr, "failed to open file %s %s\n", *argv, strerror(errno));
+    if (!file) {
+        usage(argv[0], stderr);
+        return 1;
+    }
+
+    if (!parse_open(&source, file)) {
+        fprintf(stderr, "failed to open file %s %s\n", file, strerror(errno));
         return 1;
     }
 
