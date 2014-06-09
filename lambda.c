@@ -357,27 +357,27 @@ static inline void generate_marker(FILE *out, const char *file, size_t line) {
     fprintf(out, "# %zu \"%s\"\n", line, file);
 }
 
-static void generate_sliced(FILE *out, const char *source, size_t i, size_t j, parse_data_t *data, size_t k, const char *uuid) {
-    while (j) {
-        if (k == data->lambdas.elements || data->lambdas.funcs[k].start > i + j) {
-            fwrite(source + i, j, 1, out);
+static void generate_sliced(FILE *out, const char *source, size_t pos, size_t len, parse_data_t *data, size_t lam, const char *uuid) {
+    while (len) {
+        if (lam == data->lambdas.elements || data->lambdas.funcs[lam].start > pos + len) {
+            fwrite(source + pos, len, 1, out);
             return;
         }
 
-        lambda_t *lambda = &data->lambdas.funcs[k];
-        size_t    length = lambda->body.begin + lambda->body.length + 1 - i;
+        lambda_t *lambda = &data->lambdas.funcs[lam];
+        size_t    length = lambda->body.begin + lambda->body.length + 1 - pos;
 
-        fwrite(source + i, lambda->start - i, 1, out);
+        fwrite(source + pos, lambda->start - pos, 1, out);
         fprintf(out, " ({");
         fwrite(source + lambda->type.begin, lambda->type.length, 1, out);
-        fprintf(out, " lambda_%s_%zu", uuid, k);
+        fprintf(out, " lambda_%s_%zu", uuid, lam);
         fwrite(source + lambda->args.begin, lambda->args.length, 1, out);
-        fprintf(out, "; &lambda_%s_%zu; })", uuid, k);
+        fprintf(out, "; &lambda_%s_%zu; })", uuid, lam);
 
-        j -= length;
-        i += length;
+        len -= length;
+        pos += length;
 
-        for (++k; k != data->lambdas.elements && data->lambdas.funcs[k].start < i; k++)
+        for (++lam; lam != data->lambdas.elements && data->lambdas.funcs[lam].start < pos; ++lam)
             ;
     }
 }
