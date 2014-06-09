@@ -57,16 +57,24 @@ typedef struct {
     union {
         char     *chars;
         lambda_t *funcs;
+        size_t   *positions;
     };
     size_t size;
     size_t elements;
     size_t length;
 } lambda_vector_t;
 
+typedef struct {
+  lambda_vector_t lambdas;
+  lambda_vector_t positions;
+} parse_data_t;
+
+static size_t parse(lambda_source_t *source, parse_data_t *data, size_t j, bool inlambda, bool special);
+
 /* Vector */
-static inline void lambda_vector_init(lambda_vector_t *vec, bool funcs) {
+static inline void lambda_vector_init(lambda_vector_t *vec, size_t size) {
     vec->length   = 32;
-    vec->size     = funcs ? sizeof(lambda_t) : 1;
+    vec->size     = size;
     vec->chars    = (char *)malloc(vec->length * vec->size);
     vec->elements = 0;
 }
@@ -90,6 +98,11 @@ static inline void lambda_vector_push_char(lambda_vector_t *vec, char ch) {
 static inline void lambda_vector_push_lambda(lambda_vector_t *vec, lambda_t lambda) {
     lambda_vector_resize(vec);
     vec->funcs[vec->elements++] = lambda;
+}
+
+static inline void lambda_vector_push_position(lambda_vector_t *vec, size_t pos) {
+    lambda_vector_resize(vec);
+    vec->positions[vec->elements++] = pos;
 }
 
 /* Source */
@@ -165,12 +178,10 @@ static void parse_error(lambda_source_t *source, const char *message, ...) {
     fprintf(stderr, "%s:%zu error: %s\n", source->file, source->line, buffer);
 }
 
-static size_t parse(lambda_source_t *source, lambda_vector_t *lambdas, size_t j, bool inlambda, bool special);
-
-static size_t parse_word(lambda_source_t *source, lambda_vector_t *lambdas, size_t j, size_t i) {
+static size_t parse_word(lambda_source_t *source, parse_data_t *data, size_t j, size_t i) {
     if (j != i) {
         if (strncmp(source->data + j, "lambda", i - j) == 0)
-            return parse(source, lambdas, i, true, false);
+            return parse(source, data, i, true, false);
     }
     if (source->data[i] == '\n')
         source->line++;
@@ -186,19 +197,19 @@ static size_t parse_word(lambda_source_t *source, lambda_vector_t *lambdas, size
 
 #define ERROR ((size_t)-1)
 
-static size_t parse(lambda_source_t *source, lambda_vector_t *lambdas, size_t i, bool inlambda, bool special) {
+static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool inlambda, bool special) {
     lambda_vector_t parens;
     lambda_t        lambda;
 
     memset(&lambda, 0, sizeof(lambda_t));
-    lambda_vector_init(&parens, false);
+    lambda_vector_init(&parens, sizeof(char));
 
     if (inlambda) {
         lambda.start = i - 6;
         i = parse_skip_white(source, i);
         lambda.type.begin = i;
         if (source->data[i] == '(') {
-            if ((i = parse(source, lambdas, i, false, true)) == ERROR) {
+            if ((i = parse(source, data, i, false, true)) == ERROR) {
                 lambda_vector_destroy(&parens);
                 return ERROR;
             }
@@ -206,7 +217,7 @@ static size_t parse(lambda_source_t *source, lambda_vector_t *lambdas, size_t i,
         i = parse_skip_to(source, i, '(');
         lambda.type.length = i - lambda.type.begin;
         lambda.args.begin = i;
-        if ((i = parse(source, lambdas, i, false, true)) == ERROR) {
+        if ((i = parse(source, data, i, false, true)) == ERROR) {
             lambda_vector_destroy(&parens);
             return ERROR;
         }
@@ -218,15 +229,15 @@ static size_t parse(lambda_source_t *source, lambda_vector_t *lambdas, size_t i,
     size_t j = i;
     while (i < source->length) {
         if (source->data[i] == '"') {
-            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
+            if (!special && (i = parse_word(source, data, j, i)) == ERROR)
                 goto parse_error;
             j = i = parse_skip_string(source, i+1, source->data[i]);
         } else if (source->data[i] == '\'') {
-            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
+            if (!special && (i = parse_word(source, data, j, i)) == ERROR)
                 goto parse_error;
             j = i = parse_skip_string(source, i+1, source->data[i]);
         } else if (strchr("([{", source->data[i])) {
-            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
+            if (!special && (i = parse_word(source, data, j, i)) == ERROR)
                 goto parse_error;
             lambda_vector_push_char(&parens, strchr("([{)]}", source->data[i])[3]);
             j = ++i;
@@ -249,16 +260,16 @@ static size_t parse(lambda_source_t *source, lambda_vector_t *lambdas, size_t i,
             if (inlambda) {
                 if (source->data[i] == '}' && !parens.elements) {
                     lambda.body.length = i - lambda.body.begin;
-                    lambda_vector_push_lambda(lambdas, lambda);
+                    lambda_vector_push_lambda(&data->lambdas, lambda);
                     lambda_vector_destroy(&parens);
                     return i;
                 }
             }
-            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
+            if (!special && (i = parse_word(source, data, j, i)) == ERROR)
                 goto parse_error;
             j = ++i;
         } else if (source->data[i] != '_' && !isalnum(source->data[i])) {
-            if (!special && (i = parse_word(source, lambdas, j, i)) == ERROR)
+            if (!special && (i = parse_word(source, data, j, i)) == ERROR)
                 goto parse_error;
             j = ++i;
         } else
@@ -281,18 +292,22 @@ static inline int generate_compare(const void *lhs, const void *rhs) {
     return a->start - b->start;
 }
 
+static inline int compare_size(const void *lhs, const void *rhs) {
+    return *((const size_t*)lhs) - *((const size_t*)rhs);
+}
+
 static inline void generate_marker(FILE *out, const char *file, size_t line) {
     fprintf(out, "# %zu \"%s\"\n", line, file);
 }
 
-static void generate_sliced(FILE *out, const char *source, size_t i, size_t j, lambda_vector_t *lambdas, size_t k, const char *uuid) {
+static void generate_sliced(FILE *out, const char *source, size_t i, size_t j, parse_data_t *data, size_t k, const char *uuid) {
     while (j) {
-        if (k == lambdas->elements || lambdas->funcs[k].start > i + j) {
+        if (k == data->lambdas.elements || data->lambdas.funcs[k].start > i + j) {
             fwrite(source + i, j, 1, out);
             return;
         }
 
-        lambda_t *lambda = &lambdas->funcs[k];
+        lambda_t *lambda = &data->lambdas.funcs[k];
         size_t    length = lambda->body.begin + lambda->body.length + 1 - i;
 
         fwrite(source + i, lambda->start - i, 1, out);
@@ -305,7 +320,7 @@ static void generate_sliced(FILE *out, const char *source, size_t i, size_t j, l
         j -= length;
         i += length;
 
-        for (++k; k != lambdas->elements && lambdas->funcs[k].start < i; k++)
+        for (++k; k != data->lambdas.elements && data->lambdas.funcs[k].start < i; k++)
             ;
     }
 }
@@ -324,30 +339,34 @@ static inline void generate_uuid(lambda_source_t *source) {
 }
 
 static void generate(FILE *out, lambda_source_t *source) {
-    lambda_vector_t lambdas;
-    lambda_vector_init(&lambdas, true);
-    if (parse(source, &lambdas, 0, false, false) == ERROR) {
-        lambda_vector_destroy(&lambdas);
+    parse_data_t data;
+    lambda_vector_init(&data.lambdas,   sizeof(data.lambdas.funcs[0]));
+    lambda_vector_init(&data.positions, sizeof(data.positions.positions[0]));
+    if (parse(source, &data, 0, false, false) == ERROR) {
+        lambda_vector_destroy(&data.lambdas);
+        lambda_vector_destroy(&data.positions);
         return;
     }
 
-    qsort(lambdas.funcs, lambdas.elements, sizeof(lambda_t), &generate_compare);
+    qsort(data.lambdas.funcs, data.lambdas.elements, sizeof(lambda_t), &generate_compare);
+    qsort(data.positions.positions, data.positions.elements, sizeof(size_t), &compare_size);
 
     generate_uuid(source);
     generate_marker(out, source->file, 1);
 
-    generate_sliced(out, source->data, 0, source->length, &lambdas, 0, source->uuid);
+    generate_sliced(out, source->data, 0, source->length, &data, 0, source->uuid);
 
-    for (size_t i = 0; i < lambdas.elements; i++) {
-        lambda_t *lambda = &lambdas.funcs[i];
+    for (size_t i = 0; i < data.lambdas.elements; i++) {
+        lambda_t *lambda = &data.lambdas.funcs[i];
         generate_begin(out, source, lambda, i);
-        generate_sliced(out, source->data, lambda->body.begin, lambda->body.length + 1, &lambdas, i + 1, source->uuid);
+        generate_sliced(out, source->data, lambda->body.begin, lambda->body.length + 1, &data, i + 1, source->uuid);
     }
 
     /* there are cases where we get no newline at the end of the file */
     fprintf(out, "\n");
 
-    lambda_vector_destroy(&lambdas);
+    lambda_vector_destroy(&data.lambdas);
+    lambda_vector_destroy(&data.positions);
 }
 
 int main(int argc, char **argv) {
