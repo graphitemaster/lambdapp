@@ -119,24 +119,36 @@ static inline void lambda_vector_push_position(lambda_vector_t *vec, size_t pos,
 }
 
 /* Source */
-static bool parse_open(lambda_source_t *source, const char *file) {
-    FILE *handle;
-    if (!(handle = fopen(file, "r")))
+static bool parse_open(lambda_source_t *source, FILE *handle) {
+    if (!handle)
         return false;
 
-    source->file = file;
     source->line = 1;
 
-    fseek(handle, 0, SEEK_END);
-    source->length = ftell(handle);
-    fseek(handle, 0, SEEK_SET);
+    if (fseek(handle, 0, SEEK_END) != -1) {
+        source->length = ftell(handle);
+        fseek(handle, 0, SEEK_SET);
 
-    if (!(source->data = (char *)malloc(source->length + 1)))
-        goto parse_open_error_data;
-    if (fread(source->data, source->length, 1, handle) != 1)
-        goto parse_open_error_file;
+        if (!(source->data = (char *)malloc(source->length)))
+            goto parse_open_error_data;
+        if (fread(source->data, source->length, 1, handle) != 1)
+            goto parse_open_error_file;
+    }
+    else {
+        static const size_t bs = 4096;
+        source->length = 0;
+        source->data = (char*)malloc(bs);
+        while (true) {
+            size_t r = fread(source->data, 1, bs, handle);
+            source->length += r;
+            if (feof(handle))
+                break;
+            if (ferror(handle) && errno != EINTR)
+                goto parse_open_error_file;
+            source->data = (char*)realloc(source->data, source->length + bs);
+        }
+    }
 
-    source->data[source->length] = '\0';
     fclose(handle);
     return true;
 
@@ -503,7 +515,7 @@ static void generate(FILE *out, lambda_source_t *source) {
 }
 
 static void usage(const char *prog, FILE *out) {
-    fprintf(out, "usage: %s [options] <file>\n", prog);
+    fprintf(out, "usage: %s [options] [<file>]\n", prog);
     fprintf(out,
         "options:\n"
         "  -h, --help          print this help message\n"
@@ -610,13 +622,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (!file) {
-        usage(argv[0], stderr);
-        return 1;
-    }
-
-    if (!parse_open(&source, file)) {
-        fprintf(stderr, "failed to open file %s %s\n", file, strerror(errno));
+    source.file = file ? file : "<stdin>";
+    if (!parse_open(&source, file ? fopen(file, "r") : stdin)) {
+        fprintf(stderr, "failed to open file %s %s\n", source.file, strerror(errno));
         return 1;
     }
 
