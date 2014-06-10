@@ -401,12 +401,13 @@ static inline int compare_position(const void *lhs, const void *rhs) {
     return a->pos - b->pos;
 }
 
-static inline void generate_marker(FILE *out, const char *file, size_t line) {
-    fprintf(out, "# %zu \"%s\"\n", line, file);
+static inline void generate_marker(FILE *out, const char *file, size_t line, bool newline) {
+    fprintf(out, "%s#line %zu \"%s\"\n", newline ? "\n" : "", line, file);
 }
 
 static inline void generate_begin(FILE *out, lambda_source_t *source, lambda_vector_t *lambdas, size_t idx) {
-    fprintf(out, "\n#line %zu\nstatic ", lambdas->funcs[idx].type_line);
+    generate_marker(out, source->file, lambdas->funcs[idx].type_line, true);
+    fprintf(out, "static ");
     fwrite(source->data + lambdas->funcs[idx].type.begin, lambdas->funcs[idx].type.length, 1, out);
     fprintf(out, " lambda_%zu", idx);
     fwrite(source->data + lambdas->funcs[idx].args.begin, lambdas->funcs[idx].args.length, 1, out);
@@ -456,7 +457,7 @@ static void generate_code(FILE *out, lambda_source_t *source, size_t pos, size_t
                 size_t length = point - pos;
                 fwrite(source->data + pos, length, 1, out);
                 generate_functions(out, source, data, lam, proto);
-                fprintf(out, "\n#line %zu\n", lambdapos->line);
+                generate_marker(out, source->file, lambdapos->line, true);
                 len -= length;
                 pos += length;
             }
@@ -491,7 +492,7 @@ static void generate(FILE *out, lambda_source_t *source) {
     qsort(data.lambdas.funcs, data.lambdas.elements, sizeof(lambda_t), &generate_compare);
     qsort(data.positions.positions, data.positions.elements, sizeof(lambda_position_t), &compare_position);
 
-    generate_marker(out, source->file, 1);
+    generate_marker(out, source->file, 1, false);
 
     generate_code(out, source, 0, source->length, &data, 0, false);
 
