@@ -189,7 +189,7 @@ static void parse_error(lambda_source_t *source, const char *message, ...) {
 
 static size_t parse_word(lambda_source_t *source, parse_data_t *data, size_t j, size_t i) {
     if (j != i) {
-        if (strncmp(source->data + j, "lambda", i - j) == 0)
+        if (strncmp(source->data + j, "lambda", 6) == 0)
             return parse(source, data, i, true, false);
     }
     if (source->data[i] == '\n')
@@ -419,7 +419,7 @@ static size_t next_prototype_position(parse_data_t *data, size_t lam, size_t pro
 static void generate_prototypes(FILE *out, lambda_source_t *source, parse_data_t *data, size_t lam, size_t proto) {
     size_t end = (proto+1) == data->positions.elements ? (size_t)-1 : data->positions.positions[proto+1].pos;
     for (; lam != data->lambdas.elements; ++lam) {
-        if (data->lambdas.funcs[lam].start >= end)
+        if (data->lambdas.funcs[lam].start > end)
             break;
         generate_begin(out, source, &data->lambdas, lam);
         fprintf(out, ";");
