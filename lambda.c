@@ -33,6 +33,8 @@
 #define isalnum(a) (isalpha(a) || isdigit(a))
 #define isspace(a) (((a) >= '\t' && (a) <= '\r') || (a) == ' ')
 
+static const char *DefaultKeyword = "lambda";
+
 typedef struct {
     size_t begin;
     size_t length;
@@ -48,6 +50,8 @@ typedef struct {
     char       *data;
     size_t      length;
     size_t      line;
+    const char *keyword;
+    size_t      keylength;
 } lambda_source_t;
 
 typedef struct {
@@ -189,7 +193,7 @@ static void parse_error(lambda_source_t *source, const char *message, ...) {
 
 static size_t parse_word(lambda_source_t *source, parse_data_t *data, size_t j, size_t i) {
     if (j != i) {
-        if (strncmp(source->data + j, "lambda", 6) == 0)
+        if (strncmp(source->data + j, source->keyword, source->keylength) == 0)
             return parse(source, data, i, true, false);
     }
     if (source->data[i] == '\n')
@@ -499,19 +503,75 @@ static void generate(FILE *out, lambda_source_t *source) {
 }
 
 static void usage(const char *prog, FILE *out) {
-    fprintf(out, "usage: %s <file>\n", prog);
+    fprintf(out, "usage: %s [options] <file>\n", prog);
+    fprintf(out,
+        "options:\n"
+        "  -h, --help          print this help message\n"
+        "  -V, --version       show the current program version\n"
+        "  -k, --keyword=WORD  change the lambda keyword to WORD\n");
 }
 
 static void version(FILE *out) {
     fprintf(out, "lambdapp 0.1\n");
 }
 
+/* returns false when the parameter doesn't match,
+ * returns true and sets argarg when the parameter does match,
+ * returns true and sets arg to -1 on error
+ */
+static bool isparam(int argc, char **argv, int *arg, char sh, const char *lng, char **argarg) {
+    if (!argv[*arg][0] == '-')
+        return false;
+    /* short version */
+    if (argv[*arg][1] == sh) {
+        if (argv[*arg][2]) {
+            *argarg = argv[*arg]+2;
+            return true;
+        }
+        ++*arg;
+        if (*arg == argc) {
+            fprintf(stderr, "%s: option -%c requires an argument\n", argv[0], sh);
+            usage(argv[0], stderr);
+            *arg = -1;
+            return true;
+        }
+        *argarg = argv[*arg];
+        return true;
+    }
+    /* long version */
+    if (argv[*arg][1] != '-')
+        return false;
+    size_t len = strlen(lng);
+    if (strncmp(argv[*arg]+2, lng, len))
+        return false;
+    if (argv[*arg][len+2] == '=') {
+        *argarg = argv[*arg] + 3 + len;
+        return true;
+    }
+    if (!argv[*arg][len+2]) {
+        ++*arg;
+        if (*arg == argc) {
+            fprintf(stderr, "%s: option --%s requires an argument\n", argv[0], lng);
+            usage(argv[0], stderr);
+            *arg = -1;
+            return true;
+        }
+        *argarg = argv[*arg];
+        return true;
+    }
+    return false;
+}
+
 int main(int argc, char **argv) {
     lambda_source_t source;
     const char *file = NULL;
 
+    source.keyword = DefaultKeyword;
+
     int i = 1;
     for (; i != argc; ++i) {
+        char *argarg;
+
         if (!strcmp(argv[i], "--")) {
             ++i;
             break;
@@ -523,6 +583,12 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "-V") || !strcmp(argv[i], "--version")) {
             version(stdout);
             return 0;
+        }
+        if (isparam(argc, argv, &i, 'k', "keyword", &argarg)) {
+            if (i < 0)
+                return 1;
+            source.keyword = argarg;
+            continue;
         }
         if (argv[i][0] == '-') {
             fprintf(stderr, "%s: unrecognized option: %s\n", argv[0], argv[i]);
@@ -554,6 +620,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    source.keylength = strlen(source.keyword);
     generate(stdout, &source);
     parse_close(&source);
 
