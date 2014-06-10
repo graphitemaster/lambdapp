@@ -410,13 +410,15 @@ static size_t next_prototype_position(parse_data_t *data, size_t lam, size_t pro
 static void generate_code(FILE *out, lambda_source_t *source, size_t pos, size_t len, parse_data_t *data, size_t lam, bool source_only);
 static void generate_functions(FILE *out, lambda_source_t *source, parse_data_t *data, size_t lam, size_t proto) {
     size_t end = (proto+1) == data->positions.elements ? (size_t)-1 : data->positions.positions[proto+1].pos;
+    size_t first = lam;
     for (; lam != data->lambdas.elements; ++lam) {
-        lambda_t *lambda = &data->lambdas.funcs[lam];
-        if (lambda->start > end)
+        if (data->lambdas.funcs[lam].start > end)
             break;
+    }
+    while (lam-- != first) {
+        lambda_t *lambda = &data->lambdas.funcs[lam];
         generate_begin(out, source, &data->lambdas, lam);
         generate_code(out, source, lambda->body.begin, lambda->body.length + 1, data, lam + 1, true);
-        fprintf(out, ";");
     }
     fprintf(out, "\n");
 }
