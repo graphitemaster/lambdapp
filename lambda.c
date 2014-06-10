@@ -83,42 +83,61 @@ typedef struct {
 static size_t parse(lambda_source_t *source, parse_data_t *data, size_t j, bool inlambda, bool special);
 
 /* Vector */
-static inline void lambda_vector_init(lambda_vector_t *vec, size_t size) {
+static inline bool lambda_vector_init(lambda_vector_t *vec, size_t size) {
     vec->length   = 32;
     vec->size     = size;
-    vec->chars    = (char *)malloc(vec->length * vec->size);
     vec->elements = 0;
+    return (vec->chars = (char *)malloc(vec->length * vec->size));
 }
 
 static inline void lambda_vector_destroy(lambda_vector_t *vec) {
     free(vec->chars);
 }
 
-static inline void lambda_vector_resize(lambda_vector_t *vec) {
+static inline bool lambda_vector_resize(lambda_vector_t *vec) {
     if (vec->elements != vec->length)
-        return;
+        return true;
     vec->length <<= 1;
-    vec->chars    = (char *)realloc(vec->chars, vec->length * vec->size);
+    char *temp = realloc(vec->chars, vec->length * vec->size);
+    if (!temp)
+        return false;
+    vec->chars = temp;
+    return true;
 }
 
-static inline void lambda_vector_push_char(lambda_vector_t *vec, char ch) {
-    lambda_vector_resize(vec);
+static inline bool lambda_vector_push_char(lambda_vector_t *vec, char ch) {
+    if (!lambda_vector_resize(vec))
+        return false;
     vec->chars[vec->elements++] = ch;
+    return true;
 }
 
-static inline void lambda_vector_push_lambda(lambda_vector_t *vec, lambda_t lambda) {
-    lambda_vector_resize(vec);
+static inline bool lambda_vector_push_lambda(lambda_vector_t *vec, lambda_t lambda) {
+    if (!lambda_vector_resize(vec))
+        return false;
     vec->funcs[vec->elements++] = lambda;
+    return true;
 }
 
-static inline void lambda_vector_push_position(lambda_vector_t *vec, size_t pos, size_t line) {
-    lambda_vector_resize(vec);
+static inline bool lambda_vector_push_position(lambda_vector_t *vec, size_t pos, size_t line) {
+    if (!lambda_vector_resize(vec))
+        return false;
     vec->positions[vec->elements].pos  = pos;
     vec->positions[vec->elements].line = line;
     vec->elements++;
+    return true;
 }
 
 /* Source */
+static void parse_error(lambda_source_t *source, const char *message, ...) {
+    char buffer[2048];
+    va_list va;
+    va_start(va, message);
+    vsnprintf(buffer, sizeof(buffer), message, va);
+    va_end(va);
+    fprintf(stderr, "%s:%zu error: %s\n", source->file, source->line, buffer);
+}
+
 static bool parse_open(lambda_source_t *source, FILE *handle) {
     if (!handle)
         return false;
@@ -130,31 +149,36 @@ static bool parse_open(lambda_source_t *source, FILE *handle) {
         fseek(handle, 0, SEEK_SET);
 
         if (!(source->data = (char *)malloc(source->length)))
-            goto parse_open_error_data;
+            goto parse_open_oom;
         if (fread(source->data, source->length, 1, handle) != 1)
-            goto parse_open_error_file;
+            goto parse_open_failed;
     }
     else {
         static const size_t bs = 4096;
         source->length = 0;
-        source->data = (char*)malloc(bs);
+        if (!(source->data = (char*)malloc(bs)))
+            goto parse_open_oom;
         while (true) {
             size_t r = fread(source->data, 1, bs, handle);
             source->length += r;
             if (feof(handle))
                 break;
             if (ferror(handle) && errno != EINTR)
-                goto parse_open_error_file;
-            source->data = (char*)realloc(source->data, source->length + bs);
+                goto parse_open_failed;
+            char *temp = (char*)realloc(source->data, source->length + bs);
+            if (!temp)
+                goto parse_open_oom;
+            source->data = temp;
         }
     }
 
     fclose(handle);
     return true;
 
-parse_open_error_file:
+parse_open_oom:
+    parse_error(source, "out of memory");
+parse_open_failed:
     free(source->data);
-parse_open_error_data:
     fclose(handle);
     return false;
 }
@@ -192,15 +216,6 @@ static inline size_t parse_skip_to(lambda_source_t *source, size_t i, char check
         ++i;
     }
     return i;
-}
-
-static void parse_error(lambda_source_t *source, const char *message, ...) {
-    char buffer[2048];
-    va_list va;
-    va_start(va, message);
-    vsnprintf(buffer, sizeof(buffer), message, va);
-    va_end(va);
-    fprintf(stderr, "%s:%zu error: %s\n", source->file, source->line, buffer);
 }
 
 static size_t parse_word(lambda_source_t *source, parse_data_t *data, size_t j, size_t i) {
@@ -247,19 +262,14 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
         i = parse_skip_white(source, i);
         lambda.type.begin = i;
         lambda.type_line = source->line;
-        if (source->data[i] == '(') {
-            if ((i = parse(source, data, i, false, true)) == ERROR) {
-                lambda_vector_destroy(&parens);
-                return ERROR;
-            }
-        }
+        if (source->data[i] == '(')
+            if ((i = parse(source, data, i, false, true)) == ERROR)
+                goto parse_error;
         i = parse_skip_to(source, i, '(');
         lambda.type.length = i - lambda.type.begin;
         lambda.args.begin = i;
-        if ((i = parse(source, data, i, false, true)) == ERROR) {
-            lambda_vector_destroy(&parens);
-            return ERROR;
-        }
+        if ((i = parse(source, data, i, false, true)) == ERROR)
+            goto parse_error;
         lambda.args.length = i - lambda.args.begin + 1;
         i = parse_skip_to(source, i, '{');
         lambda.body.begin = i;
@@ -277,7 +287,8 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
                     continue;
                 }
                 protomove = false;
-                lambda_vector_push_position(&data->positions, protopos, source->line);
+                if (!lambda_vector_push_position(&data->positions, protopos, source->line))
+                    goto parse_oom;
             }
 
             if (source->data[i] == ';') {
@@ -320,7 +331,8 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
         } else if (strchr("([{", source->data[i])) {
             if (!special && (i = parse_word(source, data, j, i)) == ERROR)
                 goto parse_error;
-            lambda_vector_push_char(&parens, strchr("([{)]}", source->data[i])[3]);
+            if (!lambda_vector_push_char(&parens, strchr("([{)]}", source->data[i])[3]))
+                goto parse_oom;
             j = ++i;
         } else if (strchr(")]}", source->data[i])) {
             if (!parens.elements) {
@@ -342,7 +354,8 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
                 if (source->data[i] == '}' && !parens.elements) {
                     lambda.body.length = i - lambda.body.begin;
                     lambda.end_line = source->line;
-                    lambda_vector_push_lambda(&data->lambdas, lambda);
+                    if (!lambda_vector_push_lambda(&data->lambdas, lambda))
+                        goto parse_oom;
                     lambda_vector_destroy(&parens);
                     return i;
                 }
@@ -366,6 +379,8 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
     lambda_vector_destroy(&parens);
     return i;
 
+parse_oom:
+    parse_error(source, "out of memory");
 parse_error:
     lambda_vector_destroy(&parens);
     return ERROR;
