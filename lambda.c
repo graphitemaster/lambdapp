@@ -390,31 +390,6 @@ static inline void generate_marker(FILE *out, const char *file, size_t line) {
     fprintf(out, "# %zu \"%s\"\n", line, file);
 }
 
-static void generate_sliced(FILE *out, const char *source, size_t pos, size_t len, parse_data_t *data, size_t lam) {
-    while (len) {
-        if (lam == data->lambdas.elements || data->lambdas.funcs[lam].start > pos + len) {
-            fwrite(source + pos, len, 1, out);
-            return;
-        }
-
-        lambda_t *lambda = &data->lambdas.funcs[lam];
-        size_t    length = lambda->body.begin + lambda->body.length + 1 - pos;
-
-        fwrite(source + pos, lambda->start - pos, 1, out);
-        fprintf(out, " ({");
-        fwrite(source + lambda->type.begin, lambda->type.length, 1, out);
-        fprintf(out, " lambda_%zu", lam);
-        fwrite(source + lambda->args.begin, lambda->args.length, 1, out);
-        fprintf(out, "; &lambda_%zu; })", lam);
-
-        len -= length;
-        pos += length;
-
-        for (++lam; lam != data->lambdas.elements && data->lambdas.funcs[lam].start < pos; ++lam)
-            ;
-    }
-}
-
 static inline void generate_begin(FILE *out, lambda_source_t *source, lambda_vector_t *lambdas, size_t idx) {
     fprintf(out, "\n#line %zu\nstatic ", lambdas->funcs[idx].type_line);
     fwrite(source->data + lambdas->funcs[idx].type.begin, lambdas->funcs[idx].type.length, 1, out);
@@ -432,21 +407,24 @@ static size_t next_prototype_position(parse_data_t *data, size_t lam, size_t pro
     return data->positions.elements-1;
 }
 
-static void generate_prototypes(FILE *out, lambda_source_t *source, parse_data_t *data, size_t lam, size_t proto) {
+static void generate_code(FILE *out, lambda_source_t *source, size_t pos, size_t len, parse_data_t *data, size_t lam, bool source_only);
+static void generate_functions(FILE *out, lambda_source_t *source, parse_data_t *data, size_t lam, size_t proto) {
     size_t end = (proto+1) == data->positions.elements ? (size_t)-1 : data->positions.positions[proto+1].pos;
     for (; lam != data->lambdas.elements; ++lam) {
-        if (data->lambdas.funcs[lam].start > end)
+        lambda_t *lambda = &data->lambdas.funcs[lam];
+        if (lambda->start > end)
             break;
         generate_begin(out, source, &data->lambdas, lam);
+        generate_code(out, source, lambda->body.begin, lambda->body.length + 1, data, lam + 1, true);
         fprintf(out, ";");
     }
     fprintf(out, "\n");
 }
 
 /* when generating the actual code we also take prototype-positioning into account */
-static void generate_code(FILE *out, lambda_source_t *source, size_t pos, size_t len, parse_data_t *data, size_t lam) {
+static void generate_code(FILE *out, lambda_source_t *source, size_t pos, size_t len, parse_data_t *data, size_t lam, bool source_only) {
     /* we know that positions always has at least 1 element, the 0, so the first search is there */
-    size_t proto = next_prototype_position(data, lam, 1);
+    size_t proto = source_only ? data->positions.elements : next_prototype_position(data, lam, 1);
     while (len) {
         if (lam == data->lambdas.elements || data->lambdas.funcs[lam].start > pos + len) {
             fwrite(source->data + pos, len, 1, out);
@@ -460,7 +438,7 @@ static void generate_code(FILE *out, lambda_source_t *source, size_t pos, size_t
                 /* we insert prototypes here! */
                 size_t length = point - pos;
                 fwrite(source->data + pos, length, 1, out);
-                generate_prototypes(out, source, data, lam, proto);
+                generate_functions(out, source, data, lam, proto);
                 fprintf(out, "\n#line %zu\n", lambdapos->line);
                 len -= length;
                 pos += length;
@@ -498,14 +476,7 @@ static void generate(FILE *out, lambda_source_t *source) {
 
     generate_marker(out, source->file, 1);
 
-    generate_code(out, source, 0, source->length, &data, 0);
-
-    for (size_t i = 0; i < data.lambdas.elements; i++) {
-        lambda_t *lambda = &data.lambdas.funcs[i];
-        generate_begin(out, source, &data.lambdas, i);
-        fprintf(out, "\n#line %zu\n", lambda->body_line);
-        generate_sliced(out, source->data, lambda->body.begin, lambda->body.length + 1, &data, i + 1);
-    }
+    generate_code(out, source, 0, source->length, &data, 0, false);
 
     /* there are cases where we get no newline at the end of the file */
     fprintf(out, "\n");
