@@ -29,8 +29,8 @@ This is a source translation that produces global functions and replaces instanc
 of the lambda with the literal.
 
 ### How it works
-Given a lambda, a global function is created. The scope which implements the
-lambda is replaced with a reference to the global function by taking its' address.
+Given a lambda, a static function is created. The scope which implements the
+lambda is replaced with a reference to the static function by taking its' address.
 
 #### Example
 ```
@@ -39,25 +39,25 @@ lambda is replaced with a reference to the global function by taking its' addres
 
 Would be translated to
 ```
-({ void lambda_0(void); &lambda_0 })();
-void lambda_0(void) { printf("Hello world"); }
+static void lambda_0(void);
+(&lambda_0)();
+static void lambda_0(void) { printf("Hello world"); }
 ```
 
 To better see how it works, here's the original example expanded
 ```
 hashtable_t *table;
-hashtable_foreach(table,
-     ({ void lambda_0(list_t *list); &lambda_0; })
-);
-void lambda_0(list_t *list) {
-    list_foreach(list,
-         ({ void lambda_1(const char *occupant); &lambda_1; })
-    );
+static void lambda_0(list_t *list);
+hashtable_foreach(table, &lambda_0);
+static void lambda_1(const char *occupant);
+static void lambda_0(list_t *list) {
+    list_foreach(list, &lambda_1);
 }
-void lambda_1(const char *occupant) {
+static void lambda_1(const char *occupant) {
     printf(">> %s\n", occupant);
 }
 ```
 
-Take note that we do utilize compound statement expressions since we don't know
-where to put the prototype for the lambda when it's referenced.
+### Diagnostics
+LambdaPP inserts `#file` and `#line` directives into the source code such that
+compiler diagnostics will still work.
