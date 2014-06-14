@@ -432,15 +432,10 @@ static void generate_code(FILE *out, lambda_source_t *source, size_t pos, size_t
     /* we know that positions always has at least 1 element, the 0, so the first search is there */
     size_t proto = source_only ? data->positions.elements : next_prototype_position(data, lam, 1);
     while (len) {
-        if (lam == data->lambdas.elements || data->lambdas.funcs[lam].start > pos + len) {
-            fwrite(source->data + pos, len, 1, out);
-            return;
-        }
-
         if (proto != data->positions.elements) {
             lambda_position_t *lambdapos = &data->positions.positions[proto];
             size_t point = lambdapos->pos;
-            if (pos < point && pos+len >= point) {
+            if (pos <= point && pos+len >= point) {
                 /* we insert prototypes here! */
                 size_t length = point - pos;
                 fwrite(source->data + pos, length, 1, out);
@@ -449,6 +444,11 @@ static void generate_code(FILE *out, lambda_source_t *source, size_t pos, size_t
                 len -= length;
                 pos += length;
             }
+        }
+
+        if (lam == data->lambdas.elements || data->lambdas.funcs[lam].start > pos + len) {
+            fwrite(source->data + pos, len, 1, out);
+            return;
         }
 
         lambda_t *lambda = &data->lambdas.funcs[lam];
