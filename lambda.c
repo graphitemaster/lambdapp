@@ -112,10 +112,11 @@ static inline bool lambda_vector_push_char(lambda_vector_t *vec, char ch) {
     return true;
 }
 
-static inline bool lambda_vector_push_lambda(lambda_vector_t *vec, lambda_t lambda) {
+static inline bool lambda_vector_create_lambda(lambda_vector_t *vec, size_t *idx) {
     if (!lambda_vector_resize(vec))
         return false;
-    vec->funcs[vec->elements++] = lambda;
+    *idx = vec->elements++;
+    memset(&vec->funcs[*idx], 0, sizeof(lambda_t));
     return true;
 }
 
@@ -239,7 +240,7 @@ static size_t parse_word(lambda_source_t *source, parse_data_t *data, size_t j, 
 
 static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool inlambda, bool special) {
     lambda_vector_t parens;
-    lambda_t        lambda;
+    size_t          lambda;
     bool            mark = (!inlambda && !special);
     size_t          protopos = i;
     bool            protomove = true;
@@ -253,27 +254,29 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
      * at the nest new line
      */
 
-    memset(&lambda, 0, sizeof(lambda_t));
     lambda_vector_init(&parens, sizeof(char));
 
 
     if (inlambda) {
-        lambda.start = i - 6;
+        if (!lambda_vector_create_lambda(&data->lambdas, &lambda))
+            goto parse_oom;
+        lambda_t *l = &data->lambdas.funcs[lambda];
+        l->start = i - 6;
         i = parse_skip_white(source, i);
-        lambda.type.begin = i;
-        lambda.type_line = source->line;
+        l->type.begin = i;
+        l->type_line = source->line;
         if (source->data[i] == '(')
             if ((i = parse(source, data, i, false, true)) == ERROR)
                 goto parse_error;
         i = parse_skip_to(source, i, '(');
-        lambda.type.length = i - lambda.type.begin;
-        lambda.args.begin = i;
+        l->type.length = i - l->type.begin;
+        l->args.begin = i;
         if ((i = parse(source, data, i, false, true)) == ERROR)
             goto parse_error;
-        lambda.args.length = i - lambda.args.begin + 1;
+        l->args.length = i - l->args.begin + 1;
         i = parse_skip_to(source, i, '{');
-        lambda.body.begin = i;
-        lambda.body_line  = source->line;
+        l->body.begin = i;
+        l->body_line  = source->line;
     }
 
     size_t j = i;
@@ -352,10 +355,9 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
             }
             if (inlambda) {
                 if (source->data[i] == '}' && !parens.elements) {
-                    lambda.body.length = i - lambda.body.begin;
-                    lambda.end_line = source->line;
-                    if (!lambda_vector_push_lambda(&data->lambdas, lambda))
-                        goto parse_oom;
+                    lambda_t *l = &data->lambdas.funcs[lambda];
+                    l->body.length = i - l->body.begin;
+                    l->end_line = source->line;
                     lambda_vector_destroy(&parens);
                     return i;
                 }
@@ -387,13 +389,6 @@ parse_error:
 }
 
 /* Generator */
-static inline int generate_compare(const void *lhs, const void *rhs) {
-    const lambda_t *a = (const lambda_t *)lhs;
-    const lambda_t *b = (const lambda_t *)rhs;
-
-    return a->start - b->start;
-}
-
 static inline int compare_position(const void *lhs, const void *rhs) {
     const lambda_position_t *a = (const lambda_position_t *)lhs;
     const lambda_position_t *b = (const lambda_position_t *)rhs;
@@ -489,7 +484,6 @@ static void generate(FILE *out, lambda_source_t *source) {
         return;
     }
 
-    qsort(data.lambdas.funcs, data.lambdas.elements, sizeof(lambda_t), &generate_compare);
     qsort(data.positions.positions, data.positions.elements, sizeof(lambda_position_t), &compare_position);
 
     generate_marker(out, source->file, 1, false);
