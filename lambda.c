@@ -389,13 +389,6 @@ parse_error:
 }
 
 /* Generator */
-static inline int compare_position(const void *lhs, const void *rhs) {
-    const lambda_position_t *a = (const lambda_position_t *)lhs;
-    const lambda_position_t *b = (const lambda_position_t *)rhs;
-
-    return a->pos - b->pos;
-}
-
 static inline void generate_marker(FILE *out, const char *file, size_t line, bool newline) {
     fprintf(out, "%s#line %zu \"%s\"\n", newline ? "\n" : "", line, file);
 }
