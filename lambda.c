@@ -56,10 +56,10 @@ typedef struct {
 
 typedef struct {
     size_t         start;
-    lambda_range_t type;
-    lambda_range_t args;
+    lambda_range_t decl;
     lambda_range_t body;
-    size_t         type_line;
+    size_t         name_offset;
+    size_t         decl_line;
     size_t         body_line;
     size_t         end_line;
 } lambda_t;
@@ -80,7 +80,7 @@ typedef struct {
   lambda_vector_t positions;
 } parse_data_t;
 
-static size_t parse(lambda_source_t *source, parse_data_t *data, size_t j, bool inlambda, bool special);
+static size_t parse(lambda_source_t *source, parse_data_t *data, size_t j, bool inlambda, size_t *nameofs);
 
 /* Vector */
 static inline bool lambda_vector_init(lambda_vector_t *vec, size_t size) {
@@ -210,15 +210,6 @@ static inline size_t parse_skip_white(lambda_source_t *source, size_t i) {
     return i;
 }
 
-static inline size_t parse_skip_to(lambda_source_t *source, size_t i, char check) {
-    while (i != source->length && source->data[i] != check) {
-        if (source->data[i] == '\n')
-            source->line++;
-        ++i;
-    }
-    return i;
-}
-
 static size_t parse_word(lambda_source_t *source, parse_data_t *data, size_t j, size_t i) {
     if (j != i) {
         if (strncmp(source->data + j, source->keyword, source->keylength) == 0)
@@ -238,13 +229,15 @@ static size_t parse_word(lambda_source_t *source, parse_data_t *data, size_t j, 
 
 #define ERROR ((size_t)-1)
 
-static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool inlambda, bool special) {
+static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool inlambda, size_t *nameofs) {
     lambda_vector_t parens;
     size_t          lambda = 0;
-    bool            mark = (!inlambda && !special);
+    bool            mark = (!inlambda && !nameofs);
     size_t          protopos = i;
     bool            protomove = true;
     bool            preprocessor = false;
+    bool            expectbody = false;
+    bool            movename = false;
     /* 'mark' actually means this is the outer most call and we should
      * remember where to put prototypes now!
      * when protomove is true we move the protopos along whitespace so that
@@ -263,18 +256,13 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
         lambda_t *l = &data->lambdas.funcs[lambda];
         l->start = i - 6;
         i = parse_skip_white(source, i);
-        l->type.begin = i;
-        l->type_line = source->line;
-        if (source->data[i] == '(')
-            if ((i = parse(source, data, i, false, true)) == ERROR)
-                goto parse_error;
-        i = parse_skip_to(source, i, '(');
-        l->type.length = i - l->type.begin;
-        l->args.begin = i;
-        if ((i = parse(source, data, i, false, true)) == ERROR)
+        l->decl.begin = i;
+        l->decl_line = source->line;
+        size_t ofs = 0;
+        if ((i = parse(source, data, i, false, &ofs)) == ERROR)
             goto parse_error;
-        l->args.length = i - l->args.begin + 1;
-        i = parse_skip_to(source, i, '{');
+        l->name_offset = ofs - l->decl.begin;
+        l->decl.length = i - l->decl.begin;
         l->body.begin = i;
         l->body_line  = source->line;
     }
@@ -295,7 +283,7 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
             }
 
             if (source->data[i] == ';') {
-                if (!special && (i = parse_word(source, data, j, i)) == ERROR)
+                if (!nameofs && (i = parse_word(source, data, j, i)) == ERROR)
                     goto parse_error;
                 j = ++i;
                 protomove = true;
@@ -304,7 +292,7 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
             }
 
             if (source->data[i] == '#') {
-                if (!special && (i = parse_word(source, data, j, i)) == ERROR)
+                if (!nameofs && (i = parse_word(source, data, j, i)) == ERROR)
                     goto parse_error;
                 j = ++i;
                 protomove = false;
@@ -313,7 +301,7 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
                 continue;
             }
             if (preprocessor && source->data[i] == '\n') {
-                if (!special && (i = parse_word(source, data, j, i)) == ERROR)
+                if (!nameofs && (i = parse_word(source, data, j, i)) == ERROR)
                     goto parse_error;
                 j = ++i;
                 protomove = true;
@@ -323,16 +311,34 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
             }
         }
 
+        if (movename) {
+            if (source->data[i] != '*' && source->data[i] != '(' && !isspace(source->data[i]))
+                movename = false;
+            else if (source->data[i] != '(')
+                *nameofs = i+1;
+        }
+
         if (source->data[i] == '"') {
-            if (!special && (i = parse_word(source, data, j, i)) == ERROR)
+            if (!nameofs && (i = parse_word(source, data, j, i)) == ERROR)
                 goto parse_error;
             j = i = parse_skip_string(source, i+1, source->data[i]);
         } else if (source->data[i] == '\'') {
-            if (!special && (i = parse_word(source, data, j, i)) == ERROR)
+            if (!nameofs && (i = parse_word(source, data, j, i)) == ERROR)
                 goto parse_error;
             j = i = parse_skip_string(source, i+1, source->data[i]);
         } else if (strchr("([{", source->data[i])) {
-            if (!special && (i = parse_word(source, data, j, i)) == ERROR)
+            if (nameofs && !parens.elements) {
+                if (expectbody && source->data[i] == '{') {
+                    lambda_vector_destroy(&parens);
+                    return i;
+                }
+                if (!expectbody && source->data[i] == '(') {
+                    expectbody = true;
+                    movename = true;
+                    *nameofs = i;
+                }
+            }
+            if (!nameofs && (i = parse_word(source, data, j, i)) == ERROR)
                 goto parse_error;
             if (!lambda_vector_push_char(&parens, strchr("([{)]}", source->data[i])[3]))
                 goto parse_oom;
@@ -349,21 +355,21 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
             }
             if (parens.elements != 0)
                 parens.elements--;
-            if (special && source->data[i] == ')' && !parens.elements) {
-                lambda_vector_destroy(&parens);
-                return i;
-            }
-            if (inlambda) {
-                if (source->data[i] == '}' && !parens.elements) {
+            if (source->data[i] == '}' && !parens.elements) {
+                if (inlambda) {
                     lambda_t *l = &data->lambdas.funcs[lambda];
                     l->body.length = i - l->body.begin;
                     l->end_line = source->line;
                     lambda_vector_destroy(&parens);
                     return i;
                 }
+                else if (nameofs) {
+                    if (!expectbody)
+                        movename = true;
+                }
             }
             bool domark = (mark && !parens.elements && source->data[i] == '}');
-            if (!special && (i = parse_word(source, data, j, i)) == ERROR)
+            if (!nameofs && (i = parse_word(source, data, j, i)) == ERROR)
                 goto parse_error;
             j = ++i;
             if (domark) {
@@ -371,7 +377,7 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
                 protomove = true;
             }
         } else if (source->data[i] != '_' && !isalnum(source->data[i])) {
-            if (!special && (i = parse_word(source, data, j, i)) == ERROR)
+            if (!nameofs && (i = parse_word(source, data, j, i)) == ERROR)
                 goto parse_error;
             j = ++i;
         } else
@@ -394,11 +400,12 @@ static inline void generate_marker(FILE *out, const char *file, size_t line, boo
 }
 
 static inline void generate_begin(FILE *out, lambda_source_t *source, lambda_vector_t *lambdas, size_t idx) {
-    generate_marker(out, source->file, lambdas->funcs[idx].type_line, true);
+    generate_marker(out, source->file, lambdas->funcs[idx].decl_line, true);
     fprintf(out, "static ");
-    fwrite(source->data + lambdas->funcs[idx].type.begin, lambdas->funcs[idx].type.length, 1, out);
+    size_t ofs = lambdas->funcs[idx].name_offset;
+    fwrite(source->data + lambdas->funcs[idx].decl.begin, ofs, 1, out);
     fprintf(out, " lambda_%zu", idx);
-    fwrite(source->data + lambdas->funcs[idx].args.begin, lambdas->funcs[idx].args.length, 1, out);
+    fwrite(source->data + lambdas->funcs[idx].decl.begin+ofs, lambdas->funcs[idx].decl.length-ofs, 1, out);
 }
 
 static size_t next_prototype_position(parse_data_t *data, size_t lam, size_t proto) {
