@@ -484,8 +484,6 @@ static void generate(FILE *out, lambda_source_t *source) {
         return;
     }
 
-    qsort(data.positions.positions, data.positions.elements, sizeof(lambda_position_t), &compare_position);
-
     generate_marker(out, source->file, 1, false);
 
     generate_code(out, source, 0, source->length, &data, 0, false);
