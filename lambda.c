@@ -240,7 +240,7 @@ static size_t parse_word(lambda_source_t *source, parse_data_t *data, size_t j, 
 
 static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool inlambda, bool special) {
     lambda_vector_t parens;
-    size_t          lambda;
+    size_t          lambda = 0;
     bool            mark = (!inlambda && !special);
     size_t          protopos = i;
     bool            protomove = true;
