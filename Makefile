@@ -23,6 +23,10 @@ install:
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/$(LAMBDAPP)
 
+check: $(LAMBDAPP)
+	rm -f tests/test.log
+	$(MAKE) -C tests
+
 clean:
 	rm -f $(OBJECTS)
 	rm -f $(LAMBDAPP)
