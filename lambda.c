@@ -455,7 +455,7 @@ static void generate_code(FILE *out, lambda_source_t *source, size_t pos, size_t
         size_t    length = lambda->body.begin + lambda->body.length + 1 - pos;
 
         fwrite(source->data + pos, lambda->start - pos, 1, out);
-        fprintf(out, "&lambda_%zu", lam);
+        fprintf(out, "(&lambda_%zu)", lam);
 
         len -= length;
         pos += length;
