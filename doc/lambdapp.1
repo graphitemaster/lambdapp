@@ -1,0 +1,72 @@
+.\"mdoc
+.Dd June 15, 2014
+.Dt LAMBDAPP 1 PRM
+.Os
+.Sh NAME
+.Nm lambdapp
+.Nd A preprocessor for anonymous functions in C
+.Sh SYNOPSIS
+.Nm lambdapp
+.Op Cm options
+.Op Ar file
+.Sh DESCRIPTION
+The lambda preprocessor reads C source and replaces anonymous functions
+initiated by the chosen keyword defaulting to
+.Ql lambda Ns .
+The anonymous function will be replaced by a pointer to its implementation
+which will be placed right before the function containing it.
+These implementations are declared
+.Li static
+and use the naming pattern
+.Ql lambda_ Ns Cm COUNT Ns .
+So be careful not to use names like that in your program.
+.Pp
+.Ss Options:
+.Bl -tag -width indent
+.It Fl h , Fl -help
+Show a usage message and exit.
+.It Fl V , Fl -version
+Show the current program version.
+.It Fl k , Fl -keyword= Ns Ar WORD
+Use the specified word to introduce lambdas instead of the default
+.Ql lambda Ns .
+Note that the keyword must consist of only alphanumerical characters or
+underscores.
+.It Fl s
+Enable the short syntax using
+.Ql =>
+to indicate a single-statement function body.
+This is enabled by default.
+.It Fl S
+Disable the short syntax.
+.El
+.Ss Syntax:
+An anonymous function is declared by its keyword, followed by the function
+signature, followed by the body either in block form, or as a single statement
+started by the symbol
+.Ql => Ns .
+.Sh EXAMPLES
+Regular syntax example:
+.Bd -literal -offset indent
+void twice(void (*f)(void)) {
+  f(); f();
+}
+void main() {
+  twice(lambda void(void) { printf("Hey\\n"); });
+}
+.Ed
+.Pp
+Provided the
+.Fl s
+option is used the above anonymous function can also be written as:
+.Bd -literal -offset indent
+lambda void(void) => printf("Hey\\n");
+.Ed
+.Pp
+Anonymous functions can also be executed right away:
+.Bd -literal -offset indent
+lambda void(void) => printf("Hey\\n"); ();
+lambda void(void) { printf("Hey\\n"); }();
+.Ed
+.Sh AUTHORS
+See <http://github.com/graphitemaster/lambdapp>.
