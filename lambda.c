@@ -52,6 +52,7 @@ typedef struct {
     size_t      line;
     const char *keyword;
     size_t      keylength;
+    bool        short_enabled;
 } lambda_source_t;
 
 typedef struct {
@@ -62,6 +63,7 @@ typedef struct {
     size_t         decl_line;
     size_t         body_line;
     size_t         end_line;
+    bool           is_short;
 } lambda_t;
 
 typedef struct {
@@ -80,7 +82,11 @@ typedef struct {
   lambda_vector_t positions;
 } parse_data_t;
 
-static size_t parse(lambda_source_t *source, parse_data_t *data, size_t j, bool inlambda, size_t *nameofs);
+typedef enum {
+    PARSE_NORMAL, PARSE_TYPE, PARSE_LAMBDA, PARSE_LAMBDA_EXPRESSION
+} parse_type_t;
+
+static size_t parse(lambda_source_t *source, parse_data_t *data, size_t j, parse_type_t parsetype, size_t *nameofs);
 
 /* Vector */
 static inline bool lambda_vector_init(lambda_vector_t *vec, size_t size) {
@@ -127,6 +133,12 @@ static inline bool lambda_vector_push_position(lambda_vector_t *vec, size_t pos,
     vec->positions[vec->elements].line = line;
     vec->elements++;
     return true;
+}
+
+static inline void lambda_source_init(lambda_source_t *source) {
+    memset(source, 0, sizeof(*source));
+    source->keyword       = DefaultKeyword;
+    source->short_enabled = true;
 }
 
 /* Source */
@@ -213,7 +225,7 @@ static inline size_t parse_skip_white(lambda_source_t *source, size_t i) {
 static size_t parse_word(lambda_source_t *source, parse_data_t *data, size_t j, size_t i) {
     if (j != i) {
         if (strncmp(source->data + j, source->keyword, source->keylength) == 0)
-            return parse(source, data, i, true, false);
+            return parse(source, data, i, PARSE_LAMBDA, false);
     }
     if (source->data[i] == '\n')
         source->line++;
@@ -229,10 +241,10 @@ static size_t parse_word(lambda_source_t *source, parse_data_t *data, size_t j, 
 
 #define ERROR ((size_t)-1)
 
-static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool inlambda, size_t *nameofs) {
+static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, parse_type_t parsetype, size_t *nameofs) {
     lambda_vector_t parens;
     size_t          lambda = 0;
-    bool            mark = (!inlambda && !nameofs);
+    bool            mark = (!parsetype && !nameofs);
     size_t          protopos = i;
     bool            protomove = true;
     bool            preprocessor = false;
@@ -250,7 +262,7 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
     lambda_vector_init(&parens, sizeof(char));
 
 
-    if (inlambda) {
+    if (parsetype == PARSE_LAMBDA) {
         if (!lambda_vector_create_lambda(&data->lambdas, &lambda))
             goto parse_oom;
         lambda_t *l = &data->lambdas.funcs[lambda];
@@ -259,12 +271,20 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
         l->decl.begin = i;
         l->decl_line = source->line;
         size_t ofs = 0;
-        if ((i = parse(source, data, i, false, &ofs)) == ERROR)
+        if ((i = parse(source, data, i, PARSE_TYPE, &ofs)) == ERROR)
             goto parse_error;
         l->name_offset = ofs - l->decl.begin;
         l->decl.length = i - l->decl.begin;
         l->body.begin = i;
         l->body_line  = source->line;
+        i = parse_skip_white(source, i);
+        if (source->short_enabled) {
+            if (source->data[i] == '=' && source->data[i+1] == '>') {
+                l->body.begin = i += 2;
+                l->is_short = true;
+                parsetype = PARSE_LAMBDA_EXPRESSION;
+            }
+        }
     }
 
     size_t j = i;
@@ -356,13 +376,8 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
             if (parens.elements != 0)
                 parens.elements--;
             if (source->data[i] == '}' && !parens.elements) {
-                if (inlambda) {
-                    lambda_t *l = &data->lambdas.funcs[lambda];
-                    l->body.length = i - l->body.begin;
-                    l->end_line = source->line;
-                    lambda_vector_destroy(&parens);
-                    return i;
-                }
+                if (parsetype == PARSE_LAMBDA)
+                    goto finish_lambda;
                 else if (nameofs) {
                     if (!expectbody)
                         movename = true;
@@ -379,6 +394,16 @@ static size_t parse(lambda_source_t *source, parse_data_t *data, size_t i, bool 
         } else if (source->data[i] != '_' && !isalnum(source->data[i])) {
             if (!nameofs && (i = parse_word(source, data, j, i)) == ERROR)
                 goto parse_error;
+            if (!parens.elements) {
+                if (parsetype == PARSE_LAMBDA_EXPRESSION && source->data[i] == ';')
+                    goto finish_lambda;
+                if (source->short_enabled) {
+                    if (parsetype == PARSE_TYPE && expectbody && source->data[i] == '=' && source->data[i+1] == '>') {
+                        lambda_vector_destroy(&parens);
+                        return i;
+                    }
+                }
+            }
             j = ++i;
         } else
             ++i;
@@ -392,6 +417,14 @@ parse_oom:
 parse_error:
     lambda_vector_destroy(&parens);
     return ERROR;
+finish_lambda:
+    {
+        lambda_t *l = &data->lambdas.funcs[lambda];
+        l->body.length = i - l->body.begin;
+        l->end_line = source->line;
+        lambda_vector_destroy(&parens);
+        return i;
+    }
 }
 
 /* Generator */
@@ -429,7 +462,11 @@ static void generate_functions(FILE *out, lambda_source_t *source, parse_data_t 
     while (lam-- != first) {
         lambda_t *lambda = &data->lambdas.funcs[lam];
         generate_begin(out, source, &data->lambdas, lam);
+        if (lambda->is_short)
+            fprintf(out, "{");
         generate_code(out, source, lambda->body.begin, lambda->body.length + 1, data, lam + 1, true);
+        if (lambda->is_short)
+            fprintf(out, "}");
     }
     fprintf(out, "\n");
 }
@@ -478,7 +515,7 @@ static void generate(FILE *out, lambda_source_t *source) {
     parse_data_t data;
     lambda_vector_init(&data.lambdas,   sizeof(data.lambdas.funcs[0]));
     lambda_vector_init(&data.positions, sizeof(data.positions.positions[0]));
-    if (parse(source, &data, 0, false, false) == ERROR) {
+    if (parse(source, &data, 0, PARSE_NORMAL, false) == ERROR) {
         lambda_vector_destroy(&data.lambdas);
         lambda_vector_destroy(&data.positions);
         return;
@@ -501,7 +538,9 @@ static void usage(const char *prog, FILE *out) {
         "options:\n"
         "  -h, --help          print this help message\n"
         "  -V, --version       show the current program version\n"
-        "  -k, --keyword=WORD  change the lambda keyword to WORD\n");
+        "  -k, --keyword=WORD  change the lambda keyword to WORD\n"
+        "  -s                  enable shortened syntax (default)\n"
+        "  -S                  disable shortened syntax\n");
 }
 
 static void version(FILE *out) {
@@ -559,7 +598,7 @@ int main(int argc, char **argv) {
     lambda_source_t source;
     const char *file = NULL;
 
-    source.keyword = DefaultKeyword;
+    lambda_source_init(&source);
 
     int i = 1;
     for (; i != argc; ++i) {
@@ -576,6 +615,14 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "-V") || !strcmp(argv[i], "--version")) {
             version(stdout);
             return 0;
+        }
+        if (!strcmp(argv[i], "-s")) {
+          source.short_enabled = true;
+          continue;
+        }
+        if (!strcmp(argv[i], "-S")) {
+          source.short_enabled = false;
+          continue;
         }
         if (isparam(argc, argv, &i, 'k', "keyword", &argarg)) {
             if (i < 0)
