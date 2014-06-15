@@ -3,6 +3,7 @@
 VERBOSE="${VERBOSE:-0}"
 LAMBDAPP="../lambdapp"
 CC="${CC:-cc}"
+CFLAGS="${CFLAGS} -std=c11"
 
 err() {
   local mesg="$1"; shift
@@ -54,7 +55,7 @@ compile() {
   local src="$1"; shift
   local dst="$1"; shift
   local flags=("$@")
-  logexec ${CC} "${flags[@]}" -o "$dst" "$src"
+  logexec ${CC} ${CPPFLAGS} ${CFLAGS} "${flags[@]}" -o "$dst" "$src"
 }
 
 trytest() {
