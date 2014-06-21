@@ -553,7 +553,7 @@ static void version(FILE *out) {
  * returns true and sets arg to -1 on error
  */
 static bool isparam(int argc, char **argv, int *arg, char sh, const char *lng, char **argarg) {
-    if (!argv[*arg][0] == '-')
+    if (argv[*arg][0] != '-')
         return false;
     /* short version */
     if (argv[*arg][1] == sh) {
