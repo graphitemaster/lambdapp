@@ -539,6 +539,7 @@ static void usage(const char *prog, FILE *out) {
         "  -h, --help          print this help message\n"
         "  -V, --version       show the current program version\n"
         "  -k, --keyword=WORD  change the lambda keyword to WORD\n"
+        "  -o, --output=FILE   write to FILE instead of stdout\n"
         "  -s                  enable shortened syntax (default)\n"
         "  -S                  disable shortened syntax\n");
 }
@@ -597,6 +598,8 @@ static bool isparam(int argc, char **argv, int *arg, char sh, const char *lng, c
 int main(int argc, char **argv) {
     lambda_source_t source;
     const char *file = NULL;
+    const char *output = NULL;
+    FILE       *outfile = stdout;
 
     lambda_source_init(&source);
 
@@ -630,6 +633,12 @@ int main(int argc, char **argv) {
             source.keyword = argarg;
             continue;
         }
+        if (isparam(argc, argv, &i, 'o', "output", &argarg)) {
+          if (i < 0)
+            return 1;
+          output = argarg;
+          continue;
+        }
         if (argv[i][0] == '-') {
             fprintf(stderr, "%s: unrecognized option: %s\n", argv[0], argv[i]);
             usage(argv[0], stderr);
@@ -657,7 +666,17 @@ int main(int argc, char **argv) {
     }
 
     source.keylength = strlen(source.keyword);
-    generate(stdout, &source);
+
+    if (output) {
+      outfile = fopen(output, "w");
+      if (!outfile) {
+        fprintf(stderr, "failed to open file %s: %s\n", output, strerror(errno));
+        return 1;
+      }
+    }
+    generate(outfile, &source);
+    if (outfile != stdout)
+      fclose(outfile);
     parse_close(&source);
 
     return 0;
