@@ -634,10 +634,10 @@ int main(int argc, char **argv) {
             continue;
         }
         if (isparam(argc, argv, &i, 'o', "output", &argarg)) {
-          if (i < 0)
-            return 1;
-          output = argarg;
-          continue;
+            if (i < 0)
+                return 1;
+            output = argarg;
+            continue;
         }
         if (argv[i][0] == '-') {
             fprintf(stderr, "%s: unrecognized option: %s\n", argv[0], argv[i]);
