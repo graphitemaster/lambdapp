@@ -1,4 +1,4 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
 
 VERBOSE="${VERBOSE:-0}"
 LAMBDAPP="../lambdapp"
