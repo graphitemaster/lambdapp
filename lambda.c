@@ -668,11 +668,11 @@ int main(int argc, char **argv) {
     source.keylength = strlen(source.keyword);
 
     if (output) {
-      outfile = fopen(output, "w");
-      if (!outfile) {
-        fprintf(stderr, "failed to open file %s: %s\n", output, strerror(errno));
-        return 1;
-      }
+        outfile = fopen(output, "w");
+        if (!outfile) {
+            fprintf(stderr, "failed to open file %s: %s\n", output, strerror(errno));
+            return 1;
+        }
     }
     generate(outfile, &source);
     if (outfile != stdout)
