@@ -30,7 +30,7 @@ of the lambda with the literal.
 
 ### How it works
 Given a lambda, a static function is created. The scope which implements the
-lambda is replaced with a reference to the static function by taking its' address.
+lambda is replaced with a reference to the static function by taking it's address.
 
 #### Example
 ```
@@ -44,7 +44,7 @@ static void lambda_0(void);
 static void lambda_0(void) { printf("Hello world"); }
 ```
 
-To better see how it works, here's the original example expanded
+To better see how it works, here's the original example expanded:
 ```
 hashtable_t *table;
 static void lambda_0(list_t *list);
