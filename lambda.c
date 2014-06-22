@@ -533,13 +533,12 @@ static void generate(FILE *out, lambda_source_t *source) {
 }
 
 static void usage(const char *prog, FILE *out) {
-    fprintf(out, "usage: %s [options] [<file>]\n", prog);
+    fprintf(out, "usage: %s [options] [source_file] [target_file]\n", prog);
     fprintf(out,
         "options:\n"
         "  -h, --help          print this help message\n"
         "  -V, --version       show the current program version\n"
         "  -k, --keyword=WORD  change the lambda keyword to WORD\n"
-        "  -o, --output=FILE   write to FILE instead of stdout\n"
         "  -s                  enable shortened syntax (default)\n"
         "  -S                  disable shortened syntax\n");
 }
@@ -604,13 +603,9 @@ int main(int argc, char **argv) {
     lambda_source_init(&source);
 
     int i = 1;
-    for (; i != argc; ++i) {
+    for (; (i < argc) && !file; ++i) {
         char *argarg;
 
-        if (!strcmp(argv[i], "--")) {
-            ++i;
-            break;
-        }
         if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             usage(argv[0], stdout);
             return 0;
@@ -640,23 +635,21 @@ int main(int argc, char **argv) {
             continue;
         }
         if (argv[i][0] == '-') {
-            fprintf(stderr, "%s: unrecognized option: %s\n", argv[0], argv[i]);
+            if(sizeof(argv[i]) > 1)
+                fprintf(stderr, "%s: illegal option -- %s\n", argv[0], argv[i]+1);
             usage(argv[0], stderr);
             return 1;
         }
-        if (file) {
-            fprintf(stderr, "%s: only 1 file allowed\n", argv[0]);
-            usage(argv[0], stderr);
-            return 1;
-        }
-        file = argv[i];
+        if (!file) {
+            file = argv[i];
+            if((++i) < argc) 
+                output = argv[i];
+        }  
     }
-    if (!file && i != argc)
-        file = argv[i++];
-    if (i != argc) {
-        fprintf(stderr, "%s: only 1 file allowed\n", argv[0]);
-        usage(argv[0], stderr);
-        return 1;
+    
+    if(!file || (i < argc)) {
+      usage(argv[0], stderr);
+      return 1;
     }
 
     source.file = file ? file : "<stdin>";
