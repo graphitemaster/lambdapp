@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 
 VERBOSE="${VERBOSE:-0}"
-LAMBDAPP="../lambdapp"
+LAMBDAPP="../lambda-pp"
 CC="${CC:-cc}"
 CFLAGS="${CFLAGS} -std=c11"
 
