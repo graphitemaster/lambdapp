@@ -239,12 +239,23 @@ int main(int argc, char **argv) {
         lcc_string_destroy(&args_before);
         return 1;
     }
-
+    
     /* Find the source file */
     lcc_source_t source;
     if (!lcc_source_find(argc, argv, &source)) {
-        lcc_error("Couldn't find source file on command line");
-        goto find_error;
+        /* If there isn't any source file on the command line it means
+         * the compiler is being used to invoke the linker.
+         */
+        lcc_string_destroy(&args_after);
+        lcc_string_appendf(&args_before, "%s", cc);
+        for (int i = 0; i < argc; i++) {
+            if (!lcc_string_appendf(&args_before, " %s", argv[i]))
+                goto args_oom;
+        }
+
+        int attempt = system(args_before.buffer);
+        lcc_string_destroy(&args_before);
+        return attempt;
     }
 
     /* Find the output file */
@@ -309,9 +320,7 @@ shell_oom:
     lcc_string_destroy(&shell);
 args_oom:
     lcc_error("Out of memory");
-find_error:
     lcc_string_destroy(&args_before);
     lcc_string_destroy(&args_after);
     return 1;
 }
-
