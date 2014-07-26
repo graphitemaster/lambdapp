@@ -1,5 +1,5 @@
 CC ?= clang
-LAMBDAPP := ../lambdapp
+LAMBDAPP := ../lambda-pp
 
 # Since we create an 'obj/' directory and BSD's make defaults to doing weird
 # things depending on the stars and weather etc. make sure we don't end up

@@ -149,6 +149,7 @@ static void parse_error(lambda_source_t *source, const char *message, ...) {
     vsnprintf(buffer, sizeof(buffer), message, va);
     va_end(va);
     fprintf(stderr, "%s:%zu error: %s\n", source->file, source->line, buffer);
+    fflush(stderr);
 }
 
 static bool parse_open(lambda_source_t *source, FILE *handle) {
