@@ -228,15 +228,25 @@ static size_t parse_word(lambda_source_t *source, parse_data_t *data, size_t j, 
         if (strncmp(source->data + j, source->keyword, source->keylength) == 0)
             return parse(source, data, i, PARSE_LAMBDA, false);
     }
+
     if (source->data[i] == '\n')
         source->line++;
     else if (!strncmp(source->data + i, "//", 2)) {
+        source->line++;
         /* Single line comments */
         i = strchr(source->data + i, '\n') - source->data;
     } else if (!strncmp(source->data + i, "/*", 2)) {
         /* Multi line comments */
-        i = strstr(source->data + i, "*/") - source->data;
+        char* cur = source->data + i;
+        while(*cur) {
+            if (*cur == '\n')
+                source->line++;
+            else if (!strncmp(cur, "*/", 2))
+                return cur - source->data;
+            cur++;
+        }
     }
+
     return i;
 }
 
